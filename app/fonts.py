@@ -28,5 +28,5 @@ def apply(app, settings):
     family,source=resolve_family(preferred,SANS[1:])
     size=int(settings.value('font/size',11)); mono=settings.value('font/mono','Maple Mono')
     mono_family,_=resolve_family(mono,MONO[1:])
-    font=QFont(family,size); font.setStyleHint(QFont.SansSerif); font.setStyleStrategy(QFont.PreferAntialias|QFont.PreferFullHinting); app.setFont(font)
+    font=QFont(family,size); font.setStyleHint(QFont.SansSerif); font.setStyleStrategy(QFont.PreferAntialias); font.setHintingPreference(QFont.PreferFullHinting); app.setFont(font)
     return {'family':family,'source':source,'size':size,'mono':mono_family}
