@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import Qt, QSize, QMimeData
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QPainter, QColor, QPixmap, QImage, QPalette
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QPainter, QColor, QPixmap, QImage, QPalette, QFontDatabase
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QListWidget, QListWidgetItem, QSplitter, QToolBar,
     QStatusBar, QFileDialog, QMessageBox, QLabel, QSpinBox, QDoubleSpinBox,
@@ -26,6 +26,7 @@ from .workbench import TaskQueueWidget, LogWidget, make_dock
 from .panels.shader_studio import ShaderStudioPanel
 from .panels.texture_studio import TextureStudioPanel
 from PySide6.QtCore import QSettings
+from .fonts import apply as apply_fonts
 
 
 TOOL_ITEMS = [
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         self._current_file: str | None = None
         self._recent_files: list[str] = []
         self._settings = QSettings("Emo", "Toolbox")
+        self._font_info = apply_fonts(QApplication.instance(), self._settings)
         self._theme_mode = self._settings.value("theme/mode", "dark")
         self._dark_mode = self._theme_mode == "dark"
 
@@ -275,6 +277,9 @@ class MainWindow(QMainWindow):
         dlg=QDialog(self); dlg.setWindowTitle("Toolbox 设置"); dlg.resize(520,360)
         layout=QVBoxLayout(dlg); tabs=QTabWidget(); layout.addWidget(tabs)
         general=QWidget(); gf=QFormLayout(general)
+        font_family=QComboBox(); font_family.addItems(sorted(QFontDatabase.families())); font_family.setCurrentText(self._font_info['family']); gf.addRow('字体:',font_family)
+        font_size=QSpinBox(); font_size.setRange(9,24); font_size.setValue(int(self._font_info['size'])); gf.addRow('基准字号:',font_size)
+        mono_family=QComboBox(); mono_family.addItems(sorted(QFontDatabase.families())); mono_family.setCurrentText(self._font_info['mono']); gf.addRow('等宽字体:',mono_family)
         theme=QComboBox(); theme.addItems(["dark","light","system"]); theme.setCurrentText(self._theme_mode); gf.addRow("主题:",theme)
         workers=QSpinBox(); workers.setRange(1,16); workers.setValue(self.task_queue.pool.maxThreadCount()); gf.addRow("任务并发:",workers)
         output=QLineEdit(self._settings.value("output/default", "")); browse=QPushButton("浏览")
@@ -295,6 +300,7 @@ class MainWindow(QMainWindow):
         def defaults(): theme.setCurrentText("dark"); workers.setValue(4); output.clear(); recent.setChecked(True)
         buttons.accepted.connect(dlg.accept); buttons.rejected.connect(dlg.reject); buttons.button(QDialogButtonBox.RestoreDefaults).clicked.connect(defaults)
         if dlg.exec()!=QDialog.Accepted: return
+        self._settings.setValue('font/family',font_family.currentText()); self._settings.setValue('font/size',font_size.value()); self._settings.setValue('font/mono',mono_family.currentText()); self._font_info=apply_fonts(QApplication.instance(),self._settings)
         self._theme_mode=theme.currentText(); self._settings.setValue("theme/mode",self._theme_mode); self._settings.setValue("output/default",output.text()); self._settings.setValue("files/recent",recent.isChecked()); self.task_queue.pool.setMaxThreadCount(workers.value()); self._apply_theme(); self.statusBar().showMessage("设置已应用",2500)
 
     def _setup_toolbar(self) -> None:
