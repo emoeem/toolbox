@@ -301,3 +301,12 @@ uvx ruff check .
 ```
 
 当前基线：25 个测试全部通过；Ruff 当前只作为 E9 语法错误 gate。完整风格 lint 尚未完成。
+
+
+## 0.3 打包元数据快速验证
+
+```bash
+uv build --out-dir /tmp/toolbox-build
+```
+
+预期：同时生成 `.tar.gz` 与 `.whl`；验证后可删除临时目录。

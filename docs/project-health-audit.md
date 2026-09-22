@@ -405,3 +405,9 @@ type -P gmic magick ffmpeg exiftool potrace tesseract qpdf mutool gs glslangVali
 - 真实 Wayland/X11 GUI、Shader OpenGL runtime 仍需人工验证。
 - coverage 工具尚未纳入，覆盖率仍为“未验证”。
 - `equivalent` 仍为 0；本轮没有因为增加 level 字段而虚增等价完成度。
+
+
+### 工程基线补充验证
+
+- `uv build --out-dir /tmp/toolbox-build` 已成功生成 sdist 与 wheel；随后临时构建目录已删除。
+- `pyproject.toml` 使用显式 setuptools package discovery，避免 `app/backends/processors/resources` 多顶层目录导致构建失败。
