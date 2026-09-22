@@ -24,6 +24,7 @@ from .preview_widget import ImagePreview
 from .theme import LIGHT_QSS, DARK_QSS
 from .workbench import TaskQueueWidget, LogWidget, make_dock
 from .panels.shader_studio import ShaderStudioPanel
+from .panels.texture_studio import TextureStudioPanel
 from PySide6.QtCore import QSettings
 
 
@@ -2321,6 +2322,13 @@ class MainWindow(QMainWindow):
         if decimals: w.setDecimals(decimals)
         return w
 
+    def _build_texture_studio_panel(self) -> None:
+        self._clear_right()
+        self._add_section("Texture Studio")
+        panel=TextureStudioPanel(self._settings, parent=self)
+        self.right_layout.addWidget(panel)
+        self._texture_panel=panel
+
     def _build_shader_studio_panel(self) -> None:
         self._clear_right()
         self._add_section("Shader Studio")
@@ -2568,7 +2576,7 @@ class MainWindow(QMainWindow):
             self._select_tool(int(key.rsplit("_", 1)[1])); return
         if key and key.startswith("__panel_"):
             panel = key.removeprefix("__panel_")
-            builders = {"batch_rename": self._build_batch_rename_panel, "fractal": lambda:self._build_creator_panel("fractal"), "texture": lambda:self._build_creator_panel("texture"), "mesh": lambda:self._build_creator_panel("mesh"), "shader": self._build_shader_studio_panel, "svg": lambda:self._build_creator_panel("svg"), "mosaic": lambda:self._build_creator_panel("mosaic"), "fusion": lambda:self._build_creator_panel("fusion"), "animation": lambda:self._build_creator_panel("animation")}
+            builders = {"batch_rename": self._build_batch_rename_panel, "fractal": lambda:self._build_creator_panel("fractal"), "texture": self._build_texture_studio_panel, "mesh": lambda:self._build_creator_panel("mesh"), "shader": self._build_shader_studio_panel, "svg": lambda:self._build_creator_panel("svg"), "mosaic": lambda:self._build_creator_panel("mosaic"), "fusion": lambda:self._build_creator_panel("fusion"), "animation": lambda:self._build_creator_panel("animation")}
             if panel in builders: builders[panel](); return
         try:
             src = self._parity_input()
