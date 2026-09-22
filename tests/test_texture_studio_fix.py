@@ -16,7 +16,7 @@ class TextureFixTests(unittest.TestCase):
   c=ColorField('x',QColor(17,34,51,68),True); self.assertEqual(c.color().alpha(),68); self.assertEqual(c.color().red(),17)
  def test_model_search_and_thumbnail_cache(self):
   with tempfile.TemporaryDirectory() as d:
-   lib=TextureLibrary(Path(d)); m=TextureLibraryModel(lib); self.assertEqual(m.rowCount(),14); m.set_filter('worley'); self.assertEqual(m.rowCount(),1); p=m.items[0]; first=m.thumbnail(p); second=m.thumbnail(p); self.assertFalse(first.isNull()); self.assertEqual(first.toImage(),second.toImage()); self.assertTrue((m.cache_dir/m.thumb_key(p)).exists())
+   lib=TextureLibrary(Path(d)); m=TextureLibraryModel(lib); self.assertEqual(m.rowCount(),15); m.set_filter('worley'); self.assertEqual(m.rowCount(),1); p=m.items[0]; first=m.thumbnail(p); second=m.thumbnail(p); self.assertFalse(first.isNull()); self.assertEqual(first.toImage(),second.toImage()); self.assertTrue((m.cache_dir/m.thumb_key(p)).exists())
  def test_request_ids_discard_stale(self):
   p=TextureStudioPanel(QSettings('ToolboxTest','TextureFix')); p._select_row(0); p.request_id=2; p._done(1,object()); self.assertEqual(p.request_id,2); p.close()
 if __name__=='__main__':unittest.main()

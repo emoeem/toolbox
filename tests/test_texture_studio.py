@@ -19,4 +19,8 @@ class TextureTests(unittest.TestCase):
    for ext in ('png','jpg','webp'):
     path=Path(d)/f'x.{ext}'; im.save(path)
     with Image.open(path) as check: self.assertEqual(check.size,(64,64))
+ def test_raymarch_default_and_parameter_change(self):
+  p=next(x for x in BUILTIN_PRESETS if x.generator_id.startswith('raymarch:'))
+  a=generate(p.generator_id,64,64,p.params); q=dict(p.params); q['seed']+=1; b=generate(p.generator_id,64,64,q)
+  self.assertEqual(a.size,(64,64)); self.assertEqual(a.mode,'RGB'); self.assertNotEqual(a.tobytes(),b.tobytes())
 if __name__=='__main__': unittest.main()

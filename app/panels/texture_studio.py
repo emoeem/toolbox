@@ -76,10 +76,26 @@ class TextureStudioPanel(QWidget):
         self.current=self.model.items[row]; self._make_form(); self._render()
     def _make_form(self):
         while self.form.count(): w=self.form.takeAt(0).widget(); w and w.deleteLater()
-        self.params={}; d=self.current.params.copy(); keys=['scale','octaves','persistence','lacunarity','seed','contrast','brightness','warp'] if not self.current.generator_id.startswith('pattern:') else ['size','spacing','angle']
-        ranges={'scale':(1,512,1,0),'octaves':(1,12,1,0),'persistence':(0,1,.01,2),'lacunarity':(.1,8,.05,2),'seed':(0,2147483647,1,0),'contrast':(0,4,.01,2),'brightness':(-1,1,.01,2),'warp':(0,1,.01,2),'size':(1,512,1,0),'spacing':(0,512,1,0),'angle':(-180,180,1,0)}
+        self.params={}; d=self.current.params.copy()
+        if self.current.generator_id.startswith('raymarch:'):
+            keys=['steps','max_distance','surface_threshold','light_x','light_y','light_z','ambient','diffuse','specular','fresnel','gradient','seed']
+            ranges={'steps':(8,256,1,0),'max_distance':(1,20,.1,1),'surface_threshold':(.0002,.05,.0005,4),'light_x':(-1,1,.01,2),'light_y':(-1,1,.01,2),'light_z':(-1,1,.01,2),'ambient':(0,1,.01,2),'diffuse':(0,2,.01,2),'specular':(0,2,.01,2),'fresnel':(0,1,.01,2),'gradient':(0,1,.01,2),'seed':(0,2147483647,1,0)}
+            ld=d.get('light_direction',(0.55,0.7,0.45)); d.update({'light_x':ld[0],'light_y':ld[1],'light_z':ld[2]})
+        elif self.current.generator_id.startswith('pattern:'):
+            keys=['size','spacing','angle','anti_alias']; ranges={'size':(1,512,1,0),'spacing':(0,512,1,0),'angle':(-180,180,1,0)}
+        else:
+            keys=['scale','octaves','persistence','lacunarity','seed','contrast','brightness','warp']
+            ranges={'scale':(1,512,1,0),'octaves':(1,12,1,0),'persistence':(0,1,.01,2),'lacunarity':(.1,8,.05,2),'seed':(0,2147483647,1,0),'contrast':(0,4,.01,2),'brightness':(-1,1,.01,2),'warp':(0,1,.01,2)}
         for k in keys:
-            lo,hi,step,dec=ranges[k]; c=LabeledSlider(k,lo,hi,d[k],step,dec); c.valueChanged.connect(self._render); self.params[k]=c; self.form.addRow(c)
+            if k=='anti_alias':
+                from PySide6.QtWidgets import QCheckBox
+                c=QCheckBox('抗锯齿'); c.setChecked(bool(d.get(k,True))); c.stateChanged.connect(self._render)
+            else:
+                lo,hi,step,dec=ranges[k]; c=LabeledSlider(k,lo,hi,d[k],step,dec); c.valueChanged.connect(self._render)
+            self.params[k]=c; self.form.addRow(c)
+        if self.current.generator_id.startswith('raymarch:'):
+            for k,v in [('color_a',(75,105,210)),('color_b',(225,105,155)),('background',(10,12,22))]:
+                cf=ColorField(k,QColor(*v)); cf.colorChanged.connect(lambda c:self._render()); self.params[k]=cf; self.form.addRow(cf)
         if self.current.generator_id.startswith('pattern:'):
             for k,v in [('color_a',(35,35,45)),('color_b',(210,210,220)),('background',(20,20,25))]:
                 cf=ColorField(k,QColor(*v)); cf.colorChanged.connect(lambda c,kk=k:self._color_changed(kk,c)); self.params[k]=cf; self.form.addRow(cf)
@@ -88,7 +104,10 @@ class TextureStudioPanel(QWidget):
         out={}
         for k,c in self.params.items():
             if isinstance(c,ColorField): q=c.color(); out[k]=(q.red(),q.green(),q.blue(),q.alpha())
-            else: out[k]=c.value()
+            elif hasattr(c,'value'): out[k]=c.value()
+            elif hasattr(c,'isChecked'): out[k]=c.isChecked()
+        if self.current.generator_id.startswith('raymarch:'):
+            out['light_direction']=(out.pop('light_x'),out.pop('light_y'),out.pop('light_z'))
         return out
     def _render(self):
         if not hasattr(self,'current'):return
