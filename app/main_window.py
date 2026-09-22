@@ -2144,26 +2144,25 @@ class MainWindow(QMainWindow):
         self.right_layout.addWidget(btn_run)
 
     def _run_batch(self) -> None:
-        import glob, time
-        from processors import core, utils
-        d = self.batch_dir.text()
+        import glob
+        from processors import utils
+        d=self.batch_dir.text().strip()
         if not d: return
-        exts = ["*.png","*.jpg","*.jpeg","*.webp","*.bmp"]
-        files = []
-        for e in exts: files.extend(glob.glob(os.path.join(d, e)))
+        exts=["*.png","*.jpg","*.jpeg","*.webp","*.bmp","*.tiff"]
+        files=[]
+        for e in exts: files.extend(glob.glob(os.path.join(d,e)))
         if not files:
-            QMessageBox.warning(self, "无文件", "目录中无图片"); return
-        fmt = self.batch_fmt.currentText().lower()
-        out_dir = os.path.join(d, "batch_output"); os.makedirs(out_dir, exist_ok=True)
-        start = time.time(); n = 0
-        for f in files:
-            try:
-                img = utils.load_image(f)
-                out_name = os.path.splitext(os.path.basename(f))[0] + "." + fmt
-                utils.save_image(img, os.path.join(out_dir, out_name)); n += 1
-            except Exception: pass
-        elapsed = time.time() - start
-        QMessageBox.information(self, "完成", f"已处理 {n} 张图片，耗时 {elapsed:.1f}s")
+            QMessageBox.warning(self,"无文件","目录中没有支持的图片")
+            return
+        fmt=self.batch_fmt.currentText().lower(); out_dir=os.path.join(d,"batch_output"); os.makedirs(out_dir,exist_ok=True)
+        def worker(progress):
+            done=0
+            for i,f in enumerate(files,1):
+                img=utils.load_image(f); out_name=Path(f).stem+"."+fmt; utils.save_image(img,os.path.join(out_dir,out_name)); done+=1; progress(i*100//len(files))
+            return done
+        task=self.task_queue.enqueue(f"批量转换 · {len(files)} 张",worker)
+        task.signals.finished.connect(lambda n:self.statusBar().showMessage(f"批量处理完成：{n} 张",5000))
+        self.task_dock.show()
 
     def _build_lut_panel(self) -> None:
         from processors.lut import LUT_PRESETS
