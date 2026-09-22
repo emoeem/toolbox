@@ -1,4 +1,6 @@
 import unittest
+import json,tempfile
+from pathlib import Path
 from backends.gmic_backend import GMICBackend
 from processors.texture_studio.gmic import generate_gmic_texture
 class GmicTests(unittest.TestCase):
@@ -19,4 +21,8 @@ class GmicTests(unittest.TestCase):
   p={'intensity':20,'grain_size':3,'seed':2,'contrast':1,'brightness':0,'color_tint':(255,255,255,255)}
   for n in ['paper','canvas','grunge','noise_blend']:
    im,mode=generate_gmic_texture(n,32,32,p); self.assertEqual(im.size,(32,32)); self.assertIn(mode,('gmic','numpy-degraded'))
+ def test_filter_cache_and_version_invalidation(self):
+  with tempfile.TemporaryDirectory() as d:
+   b=GMICBackend(cache_dir=d); first=b.list_filters(refresh=True); self.assertTrue((Path(d)/'filters.json').exists()); self.assertEqual(first,b.list_filters())
+   p=Path(d)/'filters.json'; data=json.loads(p.read_text()); data['version']='old-version'; p.write_text(json.dumps(data)); refreshed=b.list_filters(); self.assertEqual(refreshed,first); self.assertEqual(json.loads(p.read_text())['version'],b.get_version())
 if __name__=='__main__':unittest.main()

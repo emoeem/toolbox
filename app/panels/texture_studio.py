@@ -16,7 +16,7 @@ class RenderJob(QRunnable):
     def run(self):
         if self.cancel.is_set(): return
         try:
-            result=generate(self.g,self.w,self.h,self.p)
+            p=dict(self.p); preference=p.pop('_backend_preference','auto'); result=generate(self.g,self.w,self.h,p,preference)
             if not self.cancel.is_set(): self.signals.done.emit(self.rid,result)
         except Exception as e:
             if not self.cancel.is_set(): self.signals.done.emit(self.rid,e)
@@ -26,7 +26,14 @@ class TextureLibraryModel(QAbstractListModel):
         self.beginResetModel(); self.all_items=self.library.list(); self._filter(); self.endResetModel()
     def _filter(self):
         q=self.query.lower(); c=self.category
-        self.items=[p for p in self.all_items if (not q or q in p.name.lower() or q in p.generator_id.lower() or any(q in t.lower() for t in p.tags)) and (c=='All' or (c=='Noise' and not p.generator_id.startswith('pattern:')) or (c=='Pattern' and p.generator_id.startswith('pattern:')))]
+        def cat(p):
+            if c=='All': return True
+            if c=='Noise': return not any(p.generator_id.startswith(x) for x in ('pattern:','gmic:','raymarch:'))
+            if c=='Pattern': return p.generator_id.startswith('pattern:')
+            if c=='GMIC': return p.generator_id.startswith('gmic:')
+            if c=='Raymarch': return p.generator_id.startswith('raymarch:')
+            return True
+        self.items=[p for p in self.all_items if (not q or q in p.name.lower() or q in p.generator_id.lower() or any(q in t.lower() for t in p.tags)) and cat(p)]
     def set_filter(self,q=None,category=None):
         if q is not None:self.query=q
         if category is not None:self.category=category
@@ -57,7 +64,7 @@ class TextureStudioPanel(QWidget):
         super().__init__(parent); self.settings=settings; self.library=TextureLibrary(Path(settings.value('texture/library',str(Path.home()/'.local/share/toolbox/textures')))); self.pool=QThreadPool(self); self.request_id=0; self.cancel_token=__import__('threading').Event(); self._last=None; self._build(); self._select_row(0)
     def _build(self):
         root=QVBoxLayout(self); split=QSplitter(Qt.Horizontal); root.addWidget(split)
-        left=QWidget(); ll=QVBoxLayout(left); self.search=QLineEdit(); self.search.setPlaceholderText('搜索名称 / 分类 / 标签…'); ll.addWidget(self.search); self.category=QComboBox(); self.category.addItems(['All','Noise','Pattern','GMIC','Raymarch']); ll.addWidget(self.category); self.model=TextureLibraryModel(self.library); self.view=QListView(); self.view.setModel(self.model); self.view.setItemDelegate(TextureLibraryDelegate(self.view)); self.view.setIconSize(QSize(180,78)); self.view.setSelectionMode(QAbstractItemView.SingleSelection); ll.addWidget(self.view); split.addWidget(left)
+        left=QWidget(); ll=QVBoxLayout(left); self.search=QLineEdit(); self.search.setPlaceholderText('搜索名称 / 分类 / 标签…'); ll.addWidget(self.search); self.category=QComboBox(); self.category.addItems(['All','Noise','Pattern','GMIC','Raymarch']); ll.addWidget(self.category); self.backend_choice=QComboBox(); self.backend_choice.addItems(['自动 / GMIC native','优先 numpy 降级']); ll.addWidget(self.backend_choice); self.backend_choice.currentIndexChanged.connect(lambda _: self._render()); self.model=TextureLibraryModel(self.library); self.view=QListView(); self.view.setModel(self.model); self.view.setItemDelegate(TextureLibraryDelegate(self.view)); self.view.setIconSize(QSize(180,78)); self.view.setSelectionMode(QAbstractItemView.SingleSelection); ll.addWidget(self.view); split.addWidget(left)
         center=QWidget(); cl=QVBoxLayout(center); self.preview=QLabel(alignment=Qt.AlignCenter); self.preview.setMinimumSize(480,360); cl.addWidget(self.preview,1); self.status=QLabel(); cl.addWidget(self.status); split.addWidget(center)
         self.right=QWidget(); self.form=QFormLayout(self.right); split.addWidget(self.right); split.setSizes([250,700,380]);
         self.search.textChanged.connect(lambda q:self.model.set_filter(q=q)); self.category.currentTextChanged.connect(lambda c:self.model.set_filter(category=c)); self.view.clicked.connect(lambda i:self._select_row(i.row()))
@@ -85,7 +92,7 @@ class TextureStudioPanel(QWidget):
         return out
     def _render(self):
         if not hasattr(self,'current'):return
-        self.request_id+=1; rid=self.request_id; self.cancel_token.set(); self.cancel_token=__import__('threading').Event(); job=RenderJob(rid,self.current.generator_id,512,384,self._values(),self.cancel_token); job.signals.done.connect(self._done); self.pool.start(job); self.status.setText(f'生成中… #{rid}')
+        self.request_id+=1; rid=self.request_id; self.cancel_token.set(); self.cancel_token=__import__('threading').Event(); preference='numpy' if self.backend_choice.currentIndex()==1 else 'auto'; params=self._values(); params['_backend_preference']=preference; job=RenderJob(rid,self.current.generator_id,512,384,params,self.cancel_token); job.signals.done.connect(self._done); self.pool.start(job); self.status.setText(f'生成中… #{rid}')
     def _done(self,rid,result):
         if rid!=self.request_id:return
         if isinstance(result,Exception):self.status.setText('❌ '+str(result));return

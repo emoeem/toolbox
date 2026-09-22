@@ -281,6 +281,15 @@ class MainWindow(QMainWindow):
         brow=QHBoxLayout(); brow.addWidget(output); brow.addWidget(browse); browse.clicked.connect(lambda: output.setText(QFileDialog.getExistingDirectory(dlg) or output.text())); gf.addRow("默认输出目录:",brow)
         recent=QCheckBox("启用最近文件记录"); recent.setChecked(self._settings.value("files/recent",True,type=bool)); gf.addRow("文件:",recent)
         tabs.addTab(general,"常规")
+        backends=QWidget(); bl=QVBoxLayout(backends); backend_table=QListWidget()
+        from backends.registry import inspect_backends
+        infos=inspect_backends({'GMIC':14})
+        for info in infos: backend_table.addItem(f"{'✓' if info.available else '✗'} {info.name} | {info.version or '不可用'} | {info.path or '未找到'} | 使用 {info.usage}")
+        bl.addWidget(backend_table)
+        refresh=QPushButton('刷新 GMIC filter 缓存'); bl.addWidget(refresh)
+        from backends.gmic_backend import GMICBackend
+        refresh.clicked.connect(lambda: (GMICBackend().refresh_filters(), self.statusBar().showMessage('GMIC filter 缓存已刷新',2500)))
+        tabs.addTab(backends,'后端状态')
         about=QWidget(); al=QVBoxLayout(about); al.addWidget(QLabel("Toolbox 桌面图像工具箱")); al.addWidget(QLabel("配置使用 Qt QSettings 持久化，不改变现有处理器 API。")); tabs.addTab(about,"关于")
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel|QDialogButtonBox.RestoreDefaults); layout.addWidget(buttons)
         def defaults(): theme.setCurrentText("dark"); workers.setValue(4); output.clear(); recent.setChecked(True)
