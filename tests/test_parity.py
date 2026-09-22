@@ -12,7 +12,10 @@ from processors import parity
 class ParityProcessorTests(unittest.TestCase):
     def test_feature_registry_matches_reference_count(self):
         self.assertEqual(len(parity.PARITY_FEATURES), 67)
-        self.assertEqual(parity.parity_audit()["pending"], [])
+        audit = parity.parity_audit()
+        self.assertEqual(audit["pending"], [])
+        self.assertEqual(audit["levels"], {"placeholder": 2, "usable": 44, "equivalent": 0, "未验证": 21})
+        self.assertEqual({f["level"] for f in audit["features"]}, {"placeholder", "usable", "未验证"})
 
     def test_generators_create_valid_images(self):
         with tempfile.TemporaryDirectory() as td:
@@ -26,6 +29,7 @@ class ParityProcessorTests(unittest.TestCase):
                 fn(out)
                 with Image.open(out) as image:
                     self.assertEqual(image.size, (128, 96))
+                    self.assertGreater(len(set(image.convert("RGB").getdata())), 1)
 
     def test_fusion_modes(self):
         with tempfile.TemporaryDirectory() as td:
@@ -35,7 +39,10 @@ class ParityProcessorTests(unittest.TestCase):
                 p=root/f"{i}.png"; Image.new("RGB",(32,32),(value,value,value)).save(p); inputs.append(str(p))
             for mode in ("median", "mean", "max", "min"):
                 out=root/f"{mode}.png"; parity.multi_frame_fusion(inputs,str(out),mode)
-                with Image.open(out) as image: self.assertEqual(image.size,(32,32))
+                with Image.open(out) as image:
+                    self.assertEqual(image.size,(32,32))
+                    expected = {"median": 80, "mean": 80, "max": 120, "min": 40}[mode]
+                    self.assertEqual(image.getpixel((0,0)), (expected, expected, expected))
 
     def test_batch_rename_rejects_collisions(self):
         with tempfile.TemporaryDirectory() as td:

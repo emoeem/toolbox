@@ -640,6 +640,8 @@ DESKTOP_NATIVE_FEATURES = {
 }
 
 
+FEATURE_LEVELS = {'ai-tools': '未验证', 'apng-tools': 'usable', 'archive-tools': 'usable', 'ascii-art': 'usable', 'audio-cover-extractor': 'usable', 'base64-tools': 'usable', 'batch-rename': 'usable', 'checksum-tools': 'usable', 'cipher': 'usable', 'code-preview': 'usable', 'collage-maker': 'usable', 'color-library': 'usable', 'color-tools': 'usable', 'compression-lab': 'usable', 'curves': 'usable', 'delete-exif': 'usable', 'document-scanner': '未验证', 'draw': '未验证', 'duplicate-finder': 'usable', 'edit-exif': '未验证', 'fractal-generation': 'usable', 'image-cutting': 'usable', 'image-splitting': 'usable', 'image-stacking': 'usable', 'jxl-tools': '未验证', 'limits-resize': 'usable', 'load-net-image': '未验证', 'markup-layers': '未验证', 'mesh-gradients': 'usable', 'multi-frame-fusion': 'usable', 'noise-generation': 'usable', 'palette-pdf': '未验证', 'palette-tools': 'usable', 'photomosaic': 'usable', 'pick-color': '未验证', 'quick-tiles': 'usable', 'recognize-text': '未验证', 'resize-convert': 'usable', 'scan-qr-code': '未验证', 'shader-studio': '未验证', 'single-edit': 'usable', 'svg-maker': 'usable', 'texture-generation': 'usable', 'wallpapers-export': 'usable', 'webp-tools': 'usable', 'weight-resize': 'usable', 'watermarking': 'usable', 'app-logs': '未验证', 'compare': 'usable', 'crop': 'usable', 'easter-egg': 'placeholder', 'erase-background': '未验证', 'filters': '未验证', 'format-conversion': 'usable', 'gif-tools': 'usable', 'gradient-maker': 'usable', 'help': '未验证', 'image-preview': 'usable', 'image-stitch': 'usable', 'libraries-info': '未验证', 'library-details': '未验证', 'main': '未验证', 'media-picker': '未验证', 'pdf-tools': 'usable', 'root': '未验证', 'settings': 'usable', 'usage-statistics': 'placeholder'}
+
 FEATURE_STATUS = {key: ("native" if key in DESKTOP_NATIVE_FEATURES else "implemented")
                   for key in PARITY_FEATURES}
 FEATURE_STATUS.update({
@@ -663,11 +665,12 @@ FEATURE_STATUS.update({
 def parity_audit():
     return {
         "total": len(PARITY_FEATURES),
+        "levels": {level: sum(v == level for v in FEATURE_LEVELS.values()) for level in ("placeholder", "usable", "equivalent", "未验证")},
         "implemented": sum(v == "implemented" for v in FEATURE_STATUS.values()),
         "native": sum(v == "native" for v in FEATURE_STATUS.values()),
         "pending": [k for k, v in FEATURE_STATUS.items() if v == "pending"],
         "features": [
-            {"id": k, "title": title, "status": FEATURE_STATUS.get(k, "pending")}
+            {"id": k, "title": title, "status": FEATURE_STATUS.get(k, "pending"), "level": FEATURE_LEVELS.get(k, "未验证")}
             for k, title in PARITY_FEATURES.items()
         ],
     }
