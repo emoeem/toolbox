@@ -377,3 +377,31 @@ type -P gmic magick ffmpeg exiftool potrace tesseract qpdf mutool gs glslangVali
 5. 拆分 main_window.py。
 6. 补 LICENSE、第三方许可证清单和可选依赖矩阵。
 7. 完成以上健康度修复后，再继续功能开发。
+
+## 9. P0/P1 remediation status (2026-09-22)
+
+本节记录本轮审计后的实际修复，不回写历史审计结论。
+
+### P0
+
+- Qt 6 启动回归已修复：`QFont.StyleStrategy` 与 `QFont.HintingPreference` 不再直接 `|`；分别调用 `setStyleStrategy()` 与 `setHintingPreference()`。
+- 增加 `tests/test_fonts.py`，覆盖字体应用路径。
+- MainWindow offscreen smoke 已重新验证：`MAINWINDOW_OK`。
+- 测试从 22 个增加到 **25 个**；`QT_QPA_PLATFORM=offscreen ... unittest discover` 为 25/25 OK。
+- parity registry 增加独立 `level` 字段：`placeholder / usable / equivalent / 未验证`，并保留原 `status` 兼容字段。
+- parity 测试不再只验证尺寸：增加等级计数、生成结果非单值、fusion 精确像素结果断言。
+
+### P1
+
+- 增加 `pyproject.toml`，将运行依赖和 dev lint 依赖纳入项目元数据。
+- 增加 GitHub Actions CI：安装项目、运行 Ruff、运行 offscreen unittest。
+- 当前 Ruff gate 采用 **E9 syntax-error gate**；不是完整风格清理。历史代码存在大量 E/F 风格问题，本轮没有用批量自动修复掩盖这些问题。
+- 增加根目录 Apache-2.0 `LICENSE`，与参考项目的许可证类型一致；第三方依赖许可证清单仍需单独维护。
+- MainWindow 第一阶段拆分已完成：QSettings 创建/命名空间移入 `app/settings_store.py`，并增加持久化边界测试。没有进行大规模 UI 重构。
+
+### 当前仍未解决
+
+- MainWindow 仍约 2842 行，职责拆分尚未完成。
+- 真实 Wayland/X11 GUI、Shader OpenGL runtime 仍需人工验证。
+- coverage 工具尚未纳入，覆盖率仍为“未验证”。
+- `equivalent` 仍为 0；本轮没有因为增加 level 字段而虚增等价完成度。

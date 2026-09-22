@@ -278,3 +278,26 @@
 - 失败截图和日志
 
 不要用“单元测试通过”替代人工/输出文件验收。
+
+
+## 0.1 启动回归快速验证
+
+目标：确认 Qt 6.11 下字体初始化不会阻止 MainWindow 创建。
+
+```bash
+cd /home/emo/code/toolbox
+QT_QPA_PLATFORM=offscreen .venv/bin/python -c "from PySide6.QtWidgets import QApplication; from app.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('MAINWINDOW_OK'); w.close()"
+```
+
+预期：输出 `MAINWINDOW_OK`，且进程以 0 退出。
+
+注意：该命令只证明 offscreen MainWindow 初始化；不能替代真实 Wayland/X11 窗口人工验证。
+
+## 0.2 当前自动回归基线
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -v
+uvx ruff check .
+```
+
+当前基线：25 个测试全部通过；Ruff 当前只作为 E9 语法错误 gate。完整风格 lint 尚未完成。
