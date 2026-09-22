@@ -89,10 +89,10 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_actions()
+        self._setup_workbench_docks()
         self._setup_menu()
         self._setup_toolbar()
         self._apply_theme()
-        self._setup_workbench_docks()
         self._restore_window_state()
         self._select_tool(0)
 
