@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from time import monotonic
 from typing import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot, Qt
 from PySide6.QtWidgets import QDockWidget, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QProgressBar, QVBoxLayout, QWidget
 
 
@@ -88,5 +88,5 @@ def make_dock(title: str, widget: QWidget, parent: QWidget) -> QDockWidget:
     dock = QDockWidget(title, parent)
     dock.setObjectName(title.replace(" ", "_") + "Dock")
     dock.setWidget(widget)
-    dock.setAllowedAreas(0xF)
+    dock.setAllowedAreas(Qt.AllDockWidgetAreas)
     return dock
