@@ -268,7 +268,8 @@ class MainWindow(QMainWindow):
         m_help.addAction(self.action_about)
 
     def _setup_toolbar(self) -> None:
-        tb = QToolBar()
+        tb = QToolBar("主工具栏")
+        tb.setObjectName("MainToolBar")
         tb.setMovable(False)
         tb.setIconSize(QSize(20, 20))
         self.addToolBar(tb)
