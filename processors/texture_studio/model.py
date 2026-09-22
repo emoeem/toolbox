@@ -5,4 +5,4 @@ class TextureSpec:
     id:str; name:str; category:str; tags:list[str]=field(default_factory=list); defaults:dict[str,Any]=field(default_factory=dict)
 @dataclass
 class TexturePreset:
-    name:str; generator_id:str; params:dict[str,Any]; tags:list[str]=field(default_factory=list)
+    name:str; generator_id:str; params:dict[str,Any]; tags:list[str]=field(default_factory=list); version:int=1; backend:str='numpy'; created_at:str=''
