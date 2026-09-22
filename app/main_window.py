@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QSlider, QPushButton, QComboBox, QCheckBox, QGroupBox, QVBoxLayout,
     QHBoxLayout, QFormLayout, QScrollArea, QFrame, QTabWidget, QGridLayout,
     QSizePolicy, QColorDialog, QApplication, QProgressDialog, QTextEdit,
-    QInputDialog, QLineEdit
+    QInputDialog, QLineEdit, QDialog, QDialogButtonBox, QCheckBox
 )
 
 from processors.utils import load_image, save_image, u8, clamp
@@ -264,8 +264,27 @@ class MainWindow(QMainWindow):
         m_edit = menubar.addMenu("编辑")
         m_edit.addAction(self.action_undo)
 
+        m_tools = menubar.addMenu("工具")
+        m_tools.addAction("设置", self._show_settings)
         m_help = menubar.addMenu("帮助")
         m_help.addAction(self.action_about)
+
+    def _show_settings(self) -> None:
+        dlg=QDialog(self); dlg.setWindowTitle("Toolbox 设置"); dlg.resize(520,360)
+        layout=QVBoxLayout(dlg); tabs=QTabWidget(); layout.addWidget(tabs)
+        general=QWidget(); gf=QFormLayout(general)
+        theme=QComboBox(); theme.addItems(["dark","light","system"]); theme.setCurrentText(self._theme_mode); gf.addRow("主题:",theme)
+        workers=QSpinBox(); workers.setRange(1,16); workers.setValue(self.task_queue.pool.maxThreadCount()); gf.addRow("任务并发:",workers)
+        output=QLineEdit(self._settings.value("output/default", "")); browse=QPushButton("浏览")
+        brow=QHBoxLayout(); brow.addWidget(output); brow.addWidget(browse); browse.clicked.connect(lambda: output.setText(QFileDialog.getExistingDirectory(dlg) or output.text())); gf.addRow("默认输出目录:",brow)
+        recent=QCheckBox("启用最近文件记录"); recent.setChecked(self._settings.value("files/recent",True,type=bool)); gf.addRow("文件:",recent)
+        tabs.addTab(general,"常规")
+        about=QWidget(); al=QVBoxLayout(about); al.addWidget(QLabel("Toolbox 桌面图像工具箱")); al.addWidget(QLabel("配置使用 Qt QSettings 持久化，不改变现有处理器 API。")); tabs.addTab(about,"关于")
+        buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel|QDialogButtonBox.RestoreDefaults); layout.addWidget(buttons)
+        def defaults(): theme.setCurrentText("dark"); workers.setValue(4); output.clear(); recent.setChecked(True)
+        buttons.accepted.connect(dlg.accept); buttons.rejected.connect(dlg.reject); buttons.button(QDialogButtonBox.RestoreDefaults).clicked.connect(defaults)
+        if dlg.exec()!=QDialog.Accepted: return
+        self._theme_mode=theme.currentText(); self._settings.setValue("theme/mode",self._theme_mode); self._settings.setValue("output/default",output.text()); self._settings.setValue("files/recent",recent.isChecked()); self.task_queue.pool.setMaxThreadCount(workers.value()); self._apply_theme(); self.statusBar().showMessage("设置已应用",2500)
 
     def _setup_toolbar(self) -> None:
         tb = QToolBar("主工具栏")
@@ -761,12 +780,31 @@ class MainWindow(QMainWindow):
         btn_read.clicked.connect(self._read_exif)
         self.right_layout.addWidget(btn_read)
 
+        btn_edit = QPushButton("✏️ 编辑 EXIF")
+        btn_edit.clicked.connect(self._edit_exif_ui)
+        self.right_layout.addWidget(btn_edit)
         btn_del = QPushButton("🗑️ 删除 EXIF")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self._delete_exif)
         self.right_layout.addWidget(btn_del)
 
         self._add_stretch()
+
+    def _edit_exif_ui(self) -> None:
+        if not self._current_file or not Path(self._current_file).exists():
+            self._show_info("请先打开有文件路径的图片")
+            return
+        tag, ok = QInputDialog.getInt(self, "编辑 EXIF", "Tag ID:", 270, 1, 65535)
+        if not ok: return
+        value, ok = QInputDialog.getText(self, "编辑 EXIF", "值:")
+        if not ok: return
+        suffix=Path(self._current_file).suffix or ".jpg"
+        out=self._parity_output("保存编辑后的图片", suffix)
+        if not out: return
+        try:
+            parity.edit_exif(self._current_file,out,{str(tag):value})
+            self.load_file(out); self.statusBar().showMessage(f"EXIF 已更新: {out}",4000)
+        except Exception as e: QMessageBox.warning(self,"EXIF 编辑失败",str(e))
 
     def _read_exif(self) -> None:
         if self.preview.current_image() is None:
@@ -821,6 +859,7 @@ class MainWindow(QMainWindow):
         self.ocr_lang = QComboBox()
         self.ocr_lang.addItems(["eng", "chi_sim", "chi_tra", "eng+chi_sim", "jpn", "kor"])
         form.addRow("语言:", self.ocr_lang)
+        self.ocr_psm=QComboBox(); self.ocr_psm.addItems(["3 - 自动页面","6 - 统一文本块","11 - 稀疏文本","12 - 稀疏文本+方向"]); form.addRow("布局:",self.ocr_psm)
         self.right_layout.addWidget(gb)
 
         btn = QPushButton("🔤 开始识别")
@@ -830,6 +869,9 @@ class MainWindow(QMainWindow):
         self.ocr_result = QTextEdit()
         self.ocr_result.setPlaceholderText("识别结果将显示在这里...")
         self.right_layout.addWidget(self.ocr_result)
+        save_ocr=QPushButton("保存识别结果")
+        save_ocr.clicked.connect(self._save_ocr_result)
+        self.right_layout.addWidget(save_ocr)
 
         self._add_stretch()
 
@@ -842,7 +884,8 @@ class MainWindow(QMainWindow):
             import pytesseract
             from processors.utils import ensure_rgb, np_to_pil
             pil_img = np_to_pil(ensure_rgb(img))
-            text = pytesseract.image_to_string(pil_img, lang=self.ocr_lang.currentText())
+            psm=int(self.ocr_psm.currentText().split(" ",1)[0])
+            text = pytesseract.image_to_string(pil_img, lang=self.ocr_lang.currentText(), config=f"--psm {psm}")
             self.ocr_result.setPlainText(text)
         except Exception as e:
             if "not found" in str(e).lower() or "tesseract" in str(e).lower():
@@ -851,6 +894,13 @@ class MainWindow(QMainWindow):
                     "sudo apt install tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-jpn tesseract-ocr-kor")
             else:
                 QMessageBox.warning(self, "OCR 失败", str(e))
+
+    def _save_ocr_result(self) -> None:
+        text=self.ocr_result.toPlainText()
+        if not text: return
+        out=QFileDialog.getSaveFileName(self,"保存 OCR 结果","ocr.txt","Text (*.txt)")[0]
+        if out:
+            Path(out).write_text(text,encoding="utf-8"); self.statusBar().showMessage(f"OCR 已保存: {out}",3000)
 
     def _build_watermark_panel(self) -> None:
         self._clear_right()
