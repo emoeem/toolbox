@@ -25,8 +25,8 @@ from .theme import LIGHT_QSS, DARK_QSS
 from .workbench import TaskQueueWidget, LogWidget, make_dock
 from .panels.shader_studio import ShaderStudioPanel
 from .panels.texture_studio import TextureStudioPanel
-from PySide6.QtCore import QSettings
 from .fonts import apply as apply_fonts
+from .settings_store import DesktopSettings
 
 
 TOOL_ITEMS = [
@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._current_file: str | None = None
         self._recent_files: list[str] = []
-        self._settings = QSettings("Emo", "Toolbox")
+        self._settings = DesktopSettings()
         self._font_info = apply_fonts(QApplication.instance(), self._settings)
         self._theme_mode = self._settings.value("theme/mode", "dark")
         self._dark_mode = self._theme_mode == "dark"
