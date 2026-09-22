@@ -1,17 +1,17 @@
 LIGHT_QSS = """
 * { font-family: "LXGW ZhenKai", "LXGW WenKai Screen", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; font-size: 13px; }
-QMainWindow, QWidget { background-color: #1e1e2e; color: #1a1a1a; }
-QToolBar { background: #f5f5f5; border-bottom: 1px solid #313244; spacing: 4px; padding: 4px; }
+QMainWindow, QWidget { background-color: #f7f7fb; color: #2b2d31; }
+QToolBar { background: #ffffff; border-bottom: 1px solid #d8dbe2; spacing: 4px; padding: 4px; }
 QToolBar QToolButton {
     background: transparent; border: none; padding: 6px 10px; border-radius: 6px;
-    color: #cdd6f4; min-width: 50px;
+    color: #4b4f58; min-width: 50px;
 }
-QToolBar QToolButton:hover { background: #e6e9ef; }
+QToolBar QToolButton:hover { background: #ececf3; }
 QToolBar QToolButton:pressed { background: #45475a; }
 QToolBar QToolButton:checked { background: #cba6f7; color: white; }
 
 #Sidebar {
-    background: #f5f5f5; border-right: 1px solid #313244;
+    background: #ffffff; border-right: 1px solid #d8dbe2;
 }
 #Sidebar QListWidget {
     background: transparent; border: none; padding: 8px; outline: none;
@@ -41,7 +41,7 @@ QPushButton {
 QPushButton:hover { background: #b4befe; }
 QPushButton:pressed { background: #a78bfa; }
 QPushButton:disabled { background: #585b70; color: #7f849c; }
-QPushButton#secondary { background: #313244; color: #45475a; }
+QPushButton#secondary { background: #313244; color: #4b4f58; }
 QPushButton#secondary:hover { background: #585b70; }
 QPushButton#danger { background: #ef4444; }
 QPushButton#danger:hover { background: #dc2626; }
@@ -56,12 +56,12 @@ QSlider::handle:horizontal {
 QSlider::handle:horizontal:hover { background: #b4befe; }
 QSlider::sub-page:horizontal { background: #cba6f7; border-radius: 3px; }
 
-QLabel#section { font-size: 14px; font-weight: 600; color: #45475a; padding: 8px 2px; }
+QLabel#section { font-size: 14px; font-weight: 600; color: #2b2d31; padding: 8px 2px; }
 QLabel#hint { color: #7f849c; font-size: 12px; }
 
 QSpinBox, QDoubleSpinBox, QLineEdit, QComboBox {
     padding: 6px 10px; border: 1px solid #585b70; border-radius: 6px;
-    background: #fff; color: #cdd6f4; min-height: 20px;
+    background: #ffffff; color: #2b2d31; min-height: 20px;
 }
 QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus, QComboBox:focus {
     border-color: #cba6f7;
@@ -72,7 +72,7 @@ QGroupBox {
     padding-top: 10px; font-weight: 600; color: #45475a;
 }
 QGroupBox::title {
-    subcontrol-origin: margin; left: 12px; padding: 0 6px; background: #f5f5f5;
+    subcontrol-origin: margin; left: 12px; padding: 0 6px; background: #ffffff;
 }
 
 QCheckBox { padding: 4px; spacing: 6px; }

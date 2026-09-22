@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import Qt, QSize, QMimeData
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QPainter, QColor, QPixmap, QImage
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QPainter, QColor, QPixmap, QImage, QPalette
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QListWidget, QListWidgetItem, QSplitter, QToolBar,
     QStatusBar, QFileDialog, QMessageBox, QLabel, QSpinBox, QDoubleSpinBox,
@@ -79,7 +79,8 @@ class MainWindow(QMainWindow):
         self._current_file: str | None = None
         self._recent_files: list[str] = []
         self._settings = QSettings("Emo", "Toolbox")
-        self._dark_mode = self._settings.value("theme/dark", True, type=bool)
+        self._theme_mode = self._settings.value("theme/mode", "dark")
+        self._dark_mode = self._theme_mode == "dark"
 
         self.setWindowTitle("Image Toolbox - 图像工具箱")
         self.setMinimumSize(QSize(1180, 760))
@@ -230,7 +231,7 @@ class MainWindow(QMainWindow):
     def _save_window_state(self) -> None:
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
-        self._settings.setValue("theme/dark", self._dark_mode)
+        self._settings.setValue("theme/mode", self._theme_mode)
 
     def closeEvent(self, event) -> None:
         self._save_window_state()
@@ -316,15 +317,20 @@ class MainWindow(QMainWindow):
         tb.addWidget(btn_theme)
 
     def _apply_theme(self) -> None:
+        if self._theme_mode == "system":
+            pal = QApplication.palette(); self._dark_mode = pal.color(QPalette.Window).lightness() < 128
+        else:
+            self._dark_mode = self._theme_mode == "dark"
         self.setStyleSheet(DARK_QSS if self._dark_mode else LIGHT_QSS)
         self.setProperty("darkMode", self._dark_mode)
         self.style().unpolish(self)
         self.style().polish(self)
 
     def _toggle_theme(self) -> None:
-        self._dark_mode = not self._dark_mode
-        self._apply_theme()
-        self._settings.setValue("theme/dark", self._dark_mode)
+        modes = ["dark", "light", "system"]
+        self._theme_mode = modes[(modes.index(self._theme_mode) + 1) % len(modes)] if self._theme_mode in modes else "dark"
+        self._apply_theme(); self._settings.setValue("theme/mode", self._theme_mode)
+        self.statusBar().showMessage(f"主题: {self._theme_mode}", 2000)
 
     def _reset_window_layout(self) -> None:
         self._settings.remove("window/geometry"); self._settings.remove("window/state")
