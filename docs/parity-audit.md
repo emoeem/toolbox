@@ -122,3 +122,31 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -c "from PySide6.QtWidgets import QAp
 3. 完善设置、依赖检测、最近文件、错误详情、日志过滤与导出。
 4. 继续完善停靠布局预设、高 DPI 和键盘可达性。
 5. 对 67 个模块逐项建立回归样例和手动验收清单。
+
+## A1 Shader Studio — 2026-09-22
+
+### 已实现
+
+- 独立 `processors/shader_studio/` 模块，模型、uniform 解析、GLSL 验证、用户 preset library 解耦于主窗口。
+- 独立 `app/panels/shader_studio.py` 专业面板。
+- GLSL 编辑器：行号、关键字/函数/数字/注释高亮。
+- uniform 自动解析，支持 float/int/vec2/vec3/vec4/color 方向的参数模型；sampler2D 作为资源 uniform 不进入普通数值编辑器。
+- `@min/@max/@step/@label/@group` 注释元数据。
+- 用户 preset JSON 持久化、删除、搜索、导入/导出。
+- 三个内置 shader：Color Invert、Grayscale、Tint。
+- `glslangValidator` 语法/编译验证，错误显示在面板中，不让坏 shader 直接导致应用退出。
+- Qt `QOpenGLWidget` 实时预览架构：fullscreen triangle、纹理输入、`u_time`、`u_resolution`、uniform 更新和 framebuffer 导出。
+- 预览动画暂停/播放基础设施。
+
+### 测试
+
+- 3 个内置 shader 均通过 `glslangValidator`：Color Invert / Grayscale / Tint。
+- uniform parser / library persistence / invalid GLSL 共 3 个 Shader 专项测试通过。
+- 全部回归测试：7/7 通过。
+- Python compile：通过。
+- offscreen Qt panel construction：通过，但 Qt 在无图形会话中明确报告 `QOpenGLWidget is not supported on this platform.`；这是测试环境缺少 Wayland/X11/GL context 的环境限制，不将其报告为 GUI OpenGL 运行通过。
+- 独立 QOffscreenSurface OpenGL context 尝试：当前 Remote Desktop 无图形会话，`QOpenGLContext.create()` 返回 false，因此没有伪造“GPU shader runtime”结果。
+
+### 与 ImageToolbox 的差异
+
+ImageToolbox 的 Shader Studio 是 Android OpenGL/Compose 工作流，提供 shader preset、参数编辑、预览、导入/导出等能力。Desktop 版本现在采用 PySide6 + Qt OpenGL，功能模型保持对应，但 GLSL 运行时不是 Android 的 shader implementation；uniform 类型/语法以 desktop GLSL 3.30 为目标。当前尚未声称完成逐字节/逐算法一致性，也尚未实现完整 shader helper-source 编辑器、sampler 资源绑定 UI、序列帧批量导出和更复杂的 preset repository metadata。这些作为后续 A1.1 增量，而不是伪装成已完成。
