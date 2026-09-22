@@ -22,6 +22,8 @@ from processors.filters import ALL_FILTERS, apply_filter
 from processors import gmic, media, pdf_tools, parity
 from .preview_widget import ImagePreview
 from .theme import LIGHT_QSS, DARK_QSS
+from .workbench import TaskQueueWidget, LogWidget, make_dock
+from PySide6.QtCore import QSettings
 
 
 TOOL_ITEMS = [
@@ -76,7 +78,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._current_file: str | None = None
         self._recent_files: list[str] = []
-        self._dark_mode = True
+        self._settings = QSettings("Emo", "Toolbox")
+        self._dark_mode = self._settings.value("theme/dark", True, type=bool)
 
         self.setWindowTitle("Image Toolbox - 图像工具箱")
         self.setMinimumSize(QSize(1180, 760))
@@ -88,6 +91,8 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_toolbar()
         self._apply_theme()
+        self._setup_workbench_docks()
+        self._restore_window_state()
         self._select_tool(0)
 
     def _setup_ui(self) -> None:
@@ -207,6 +212,30 @@ class MainWindow(QMainWindow):
         self.action_about.setShortcut(QKeySequence.HelpContents)
         self.action_about.triggered.connect(self._show_about)
 
+    def _setup_workbench_docks(self) -> None:
+        self.task_queue = TaskQueueWidget(self)
+        self.log_widget = LogWidget(self)
+        self.task_dock = make_dock("任务队列", self.task_queue, self)
+        self.log_dock = make_dock("运行日志", self.log_widget, self)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.task_dock)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
+        self.task_dock.hide(); self.log_dock.hide()
+
+    def _restore_window_state(self) -> None:
+        geometry = self._settings.value("window/geometry")
+        state = self._settings.value("window/state")
+        if geometry: self.restoreGeometry(geometry)
+        if state: self.restoreState(state)
+
+    def _save_window_state(self) -> None:
+        self._settings.setValue("window/geometry", self.saveGeometry())
+        self._settings.setValue("window/state", self.saveState())
+        self._settings.setValue("theme/dark", self._dark_mode)
+
+    def closeEvent(self, event) -> None:
+        self._save_window_state()
+        super().closeEvent(event)
+
     def _setup_menu(self) -> None:
         menubar = self.menuBar()
 
@@ -226,6 +255,10 @@ class MainWindow(QMainWindow):
         m_view.addAction(self.action_zoom_out)
         m_view.addSeparator()
         m_view.addAction(self.action_theme)
+        m_view.addSeparator()
+        m_view.addAction(self.task_dock.toggleViewAction())
+        m_view.addAction(self.log_dock.toggleViewAction())
+        m_view.addAction("重置窗口布局", self._reset_window_layout)
 
         m_edit = menubar.addMenu("编辑")
         m_edit.addAction(self.action_undo)
@@ -291,6 +324,12 @@ class MainWindow(QMainWindow):
     def _toggle_theme(self) -> None:
         self._dark_mode = not self._dark_mode
         self._apply_theme()
+        self._settings.setValue("theme/dark", self._dark_mode)
+
+    def _reset_window_layout(self) -> None:
+        self._settings.remove("window/geometry"); self._settings.remove("window/state")
+        self.resize(1480, 900); self.task_dock.hide(); self.log_dock.hide()
+        self.statusBar().showMessage("窗口布局已重置", 2500)
 
     def _filter_tools(self, text: str) -> None:
         query = text.strip().lower()
@@ -2220,27 +2259,121 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "错误", str(e))
 
+    def _creator_spin(self, label, value, lo, hi, step=1, decimals=0):
+        w = QDoubleSpinBox() if decimals else QSpinBox(); w.setRange(lo, hi); w.setValue(value); w.setSingleStep(step)
+        if decimals: w.setDecimals(decimals)
+        return w
+
     def _build_creator_panel(self, kind: str) -> None:
-        self._clear_right(); titles={"fractal":"分形生成","texture":"纹理生成","mesh":"网格渐变","svg":"SVG 制作","shader":"Shader Studio","mosaic":"照片马赛克","fusion":"多帧融合","animation":"动画格式转换"}; self._add_section(titles.get(kind,kind))
-        box=QGroupBox("参数"); form=QFormLayout(box); self.creator_width=QSpinBox(); self.creator_width.setRange(16,8192); self.creator_width.setValue(1024); self.creator_height=QSpinBox(); self.creator_height.setRange(16,8192); self.creator_height.setValue(1024); form.addRow("宽度:",self.creator_width); form.addRow("高度:",self.creator_height)
-        if kind=="fractal": self.creator_iter=QSpinBox(); self.creator_iter.setRange(10,1000); self.creator_iter.setValue(120); form.addRow("迭代:",self.creator_iter)
-        if kind=="texture": self.creator_type=QComboBox(); self.creator_type.addItems(["noise","cloud","fine","coarse"]); form.addRow("类型:",self.creator_type)
-        if kind=="shader": self.creator_effect=QComboBox(); self.creator_effect.addItems(["invert","grayscale","contrast","posterize","edge"]); form.addRow("效果:",self.creator_effect)
-        if kind=="animation": self.creator_format=QComboBox(); self.creator_format.addItems(["WEBP","GIF","APNG"]); form.addRow("输出:",self.creator_format)
-        self.right_layout.addWidget(box); b=QPushButton("执行"); b.clicked.connect(lambda:self._run_creator(kind)); self.right_layout.addWidget(b); self._add_stretch()
+        self._clear_right()
+        titles={"fractal":"分形生成","texture":"纹理生成","mesh":"网格渐变","svg":"SVG 制作","shader":"Shader Studio","mosaic":"照片马赛克","fusion":"多帧融合","animation":"动画格式转换"}
+        self._add_section(titles[kind])
+        hint=QLabel({"fractal":"支持 Mandelbrot 风格分形参数化生成。","texture":"提供可重复的种子与尺度，避免不可控的随机结果。","mesh":"四角颜色双线性插值，可直接生成高分辨率背景。","svg":"生成可编辑的矢量 SVG，不依赖浏览器。","shader":"CPU 后端用于稳定预览；参数可即时调整。","mosaic":"素材图与目标图分离，支持重复间距、颜色混合与素材上限。","fusion":"支持 median / mean / max / min 多种融合策略。","animation":"保留原始帧时长，也可统一 FPS。"}[kind]); hint.setObjectName("hint"); self.right_layout.addWidget(hint)
+
+        box=QGroupBox("输出") ; form=QFormLayout(box)
+        self.creator_width=self._creator_spin("",1024,16,8192); self.creator_height=self._creator_spin("",1024,16,8192)
+        form.addRow("宽度:",self.creator_width); form.addRow("高度:",self.creator_height)
+        self.right_layout.addWidget(box)
+
+        if kind=="fractal":
+            box=QGroupBox("分形参数"); f=QFormLayout(box)
+            self.creator_formula=QComboBox(); self.creator_formula.addItems(["Mandelbrot","Julia"]); f.addRow("公式:",self.creator_formula)
+            self.creator_iter=self._creator_spin("",320,16,8192); self.creator_scale=self._creator_spin("",3.0,0.01,20.0,0.05,3)
+            self.creator_cx=self._creator_spin("",-0.7435,-4,4,0.0001,4); self.creator_cy=self._creator_spin("",0.1314,-4,4,0.0001,4)
+            f.addRow("迭代:",self.creator_iter); f.addRow("视野尺度:",self.creator_scale); f.addRow("中心 X:",self.creator_cx); f.addRow("中心 Y:",self.creator_cy)
+            self.right_layout.addWidget(box)
+        elif kind=="texture":
+            box=QGroupBox("纹理参数"); f=QFormLayout(box); self.creator_type=QComboBox(); self.creator_type.addItems(["noise","cloud","stripes","rings"]); f.addRow("类型:",self.creator_type)
+            self.creator_scale=self._creator_spin("",8,1,128); self.creator_seed=self._creator_spin("",0,0,2_147_483_647); f.addRow("尺度:",self.creator_scale); f.addRow("随机种子:",self.creator_seed); self.right_layout.addWidget(box)
+        elif kind=="mesh":
+            box=QGroupBox("四角颜色"); f=QFormLayout(box); self.mesh_colors=[]
+            for i,c in enumerate(["#6d5dfc","#ff5ca8","#35d0ba","#ffd166"]):
+                e=QLineEdit(c); self.mesh_colors.append(e); f.addRow(f"颜色 {i+1}:",e)
+            self.right_layout.addWidget(box)
+        elif kind=="shader":
+            box=QGroupBox("Shader 参数"); f=QFormLayout(box); self.creator_effect=QComboBox(); self.creator_effect.addItems(["invert","posterize","scanlines","vignette","identity"]); self.creator_strength=self._creator_spin("",1.0,0,1,0.05,2); f.addRow("效果:",self.creator_effect); f.addRow("强度:",self.creator_strength); self.right_layout.addWidget(box)
+        elif kind=="mosaic":
+            box=QGroupBox("马赛克参数"); f=QFormLayout(box); self.mosaic_columns=self._creator_spin("",40,10,100); self.mosaic_repeat=self._creator_spin("",2,0,20); self.mosaic_blend=self._creator_spin("",0.12,0,0.6,0.01,2); self.mosaic_max=self._creator_spin("",300,10,500); f.addRow("列数:",self.mosaic_columns); f.addRow("重复间距:",self.mosaic_repeat); f.addRow("颜色混合:",self.mosaic_blend); f.addRow("最大素材:",self.mosaic_max); self.right_layout.addWidget(box)
+        elif kind=="fusion":
+            box=QGroupBox("融合参数"); f=QFormLayout(box); self.fusion_method=QComboBox(); self.fusion_method.addItems(["median","mean","max","min"]); f.addRow("算法:",self.fusion_method); self.right_layout.addWidget(box)
+        elif kind=="svg":
+            box=QGroupBox("SVG 图形"); f=QFormLayout(box); self.svg_shape=QComboBox(); self.svg_shape.addItems(["rect","circle","text"]); self.svg_x=self._creator_spin("",100,0,8192); self.svg_y=self._creator_spin("",100,0,8192); self.svg_size=self._creator_spin("",160,1,8192); self.svg_text=QLineEdit("Toolbox"); f.addRow("图形:",self.svg_shape); f.addRow("X:",self.svg_x); f.addRow("Y:",self.svg_y); f.addRow("尺寸:",self.svg_size); f.addRow("文字:",self.svg_text); self.right_layout.addWidget(box)
+        elif kind=="animation":
+            box=QGroupBox("动画参数"); f=QFormLayout(box); self.creator_format=QComboBox(); self.creator_format.addItems(["WEBP","GIF","PNG"]); self.creator_fps=self._creator_spin("",10,1,120); self.creator_duration=self._creator_spin("",100,1,10000); f.addRow("格式:",self.creator_format); f.addRow("FPS:",self.creator_fps); f.addRow("默认帧时长:",self.creator_duration); self.right_layout.addWidget(box)
+
+        run=QPushButton("生成 / 处理"); run.clicked.connect(lambda:self._run_creator(kind)); self.right_layout.addWidget(run)
+        self._add_stretch()
 
     def _run_creator(self, kind: str) -> None:
         try:
             import tempfile
             w,h=self.creator_width.value(),self.creator_height.value()
-            if kind=="fractal": from processors.parity import generate_fractal; out=tempfile.mktemp(suffix=".png"); generate_fractal(out,w,h,self.creator_iter.value()); self.preview.set_image(load_image(out))
-            elif kind=="texture": from processors.parity import texture_generate; out=tempfile.mktemp(suffix=".png"); texture_generate(out,w,h,self.creator_type.currentText()); self.preview.set_image(load_image(out))
-            elif kind=="mesh": from processors.parity import mesh_gradient; out=tempfile.mktemp(suffix=".png"); mesh_gradient(out,w,h); self.preview.set_image(load_image(out))
-            elif kind=="svg": from processors.parity import svg_make; out=QFileDialog.getSaveFileName(self,"保存 SVG","design.svg","SVG (*.svg)")[0]; svg_make(out,w,h) if out else None
-            elif kind=="shader": src=self._parity_input(); out=tempfile.mktemp(suffix=".png") if src else None; from processors.parity import shader_cpu; shader_cpu(src,out,self.creator_effect.currentText()) if src else None; self.preview.set_image(load_image(out)) if out else None
-            elif kind=="fusion": files,_=QFileDialog.getOpenFileNames(self,"选择多帧图片","","图片 (*.png *.jpg *.jpeg *.webp)"); out=tempfile.mktemp(suffix=".png"); from processors.parity import multi_frame_fusion; multi_frame_fusion(files,out,"median") if files else None; self.preview.set_image(load_image(out)) if files else None
-            self.statusBar().showMessage("处理完成",3000)
+            out=tempfile.mktemp(suffix='.png')
+            if kind=="fractal":
+                from processors.parity import generate_fractal; generate_fractal(out,w,h,self.creator_iter.value(),(self.creator_cx.value(),self.creator_cy.value()),self.creator_scale.value())
+            elif kind=="texture":
+                from processors.parity import texture_generate; texture_generate(out,w,h,self.creator_type.currentText(),self.creator_scale.value(),self.creator_seed.value())
+            elif kind=="mesh":
+                from processors.parity import mesh_gradient; mesh_gradient(out,w,h,[e.text().strip() for e in self.mesh_colors])
+            elif kind=="shader":
+                src=self._parity_input()
+                if not src: return
+                from processors.parity import shader_cpu; shader_cpu(src,out,self.creator_effect.currentText(),self.creator_strength.value())
+            elif kind=="mosaic":
+                src=self._parity_input(); tiles,_=QFileDialog.getOpenFileNames(self,"选择马赛克素材","","图片 (*.png *.jpg *.jpeg *.webp *.bmp)")
+                if not src or len(tiles)<10: QMessageBox.warning(self,"素材不足","照片马赛克至少需要 10 张素材图片"); return
+                out=QFileDialog.getSaveFileName(self,"保存照片马赛克","mosaic.jpg","JPEG (*.jpg)")[0]
+                if not out: return
+                from processors.parity import photomosaic; photomosaic(src,tiles,out,self.mosaic_columns.value(),self.mosaic_repeat.value(),self.mosaic_blend.value(),self.mosaic_max.value()); self.preview.set_image(load_image(out)); return
+            elif kind=="fusion":
+                files,_=QFileDialog.getOpenFileNames(self,"选择融合帧","","图片 (*.png *.jpg *.jpeg *.webp)")
+                if len(files)<2: return
+                from processors.parity import multi_frame_fusion; multi_frame_fusion(files,out,self.fusion_method.currentText())
+            elif kind=="svg":
+                out=QFileDialog.getSaveFileName(self,"保存 SVG","design.svg","SVG (*.svg)")[0]
+                if not out: return
+                shape=self.svg_shape.currentText(); v=self.svg_size.value(); x=self.svg_x.value(); y=self.svg_y.value()
+                if shape=="rect": shapes=[{"type":"rect","x":x,"y":y,"w":v,"h":v,"rx":16,"fill":"#6d5dfc"}]
+                elif shape=="circle": shapes=[{"type":"circle","cx":x,"cy":y,"r":v/2,"fill":"#ff5ca8"}]
+                else: shapes=[{"type":"text","x":x,"y":y,"size":v/2,"fill":"#6d5dfc","text":self.svg_text.text()}]
+                from processors.parity import svg_make; svg_make(out,w,h,"#ffffff",shapes); self.statusBar().showMessage(f"SVG 已保存: {out}",4000); return
+            elif kind=="animation":
+                files,_=QFileDialog.getOpenFileNames(self,"选择动画/帧","","图片/动画 (*.png *.jpg *.jpeg *.webp *.gif)")
+                if not files: return
+                ext=self.creator_format.currentText().lower(); out=QFileDialog.getSaveFileName(self,"保存动画",f"animation.{ext}")[0]
+                if not out: return
+                from processors.parity import convert_animation_format; convert_animation_format(files[0],out,self.creator_format.currentText(),self.creator_fps.value()); self.statusBar().showMessage(f"动画已保存: {out}",4000); return
+            self.preview.set_image(load_image(out)); self.statusBar().showMessage("处理完成",3000)
         except Exception as e: QMessageBox.warning(self,"处理失败",str(e))
+
+    def _build_batch_rename_panel(self) -> None:
+        self._clear_right(); self._add_section("批量重命名")
+        self.batch_rename_files: list[str] = []
+        self.batch_rename_list = QListWidget(); self.right_layout.addWidget(self.batch_rename_list)
+        row=QHBoxLayout(); add=QPushButton("添加文件"); add.clicked.connect(self._pick_batch_rename_files); clear=QPushButton("清空"); clear.clicked.connect(lambda:(self.batch_rename_list.clear(),self.batch_rename_files.clear())); row.addWidget(add); row.addWidget(clear); self.right_layout.addLayout(row)
+        box=QGroupBox("命名规则"); f=QFormLayout(box); self.rename_pattern=QLineEdit("{original}_{sequence}"); self.rename_start=self._creator_spin("",1,0,999999); self.rename_padding=self._creator_spin("",3,1,8); self.rename_prefix=QLineEdit(); self.rename_suffix=QLineEdit(); f.addRow("模板:",self.rename_pattern); f.addRow("起始序号:",self.rename_start); f.addRow("补零:",self.rename_padding); f.addRow("前缀:",self.rename_prefix); f.addRow("后缀:",self.rename_suffix); self.right_layout.addWidget(box)
+        hint=QLabel("可用：{original} {sequence} {ext} {parent} {size} {date} {uuid}"); hint.setObjectName("hint"); self.right_layout.addWidget(hint)
+        preview=QPushButton("预览重命名"); preview.clicked.connect(self._preview_batch_rename); self.right_layout.addWidget(preview)
+        apply=QPushButton("执行重命名"); apply.setObjectName("danger"); apply.clicked.connect(self._apply_batch_rename_panel); self.right_layout.addWidget(apply); self._add_stretch()
+
+    def _pick_batch_rename_files(self):
+        files,_=QFileDialog.getOpenFileNames(self,"选择要重命名的文件"); self.batch_rename_files=files; self.batch_rename_list.clear(); self.batch_rename_list.addItems(files)
+
+    def _batch_rename_plan(self):
+        from processors.parity import batch_rename
+        return batch_rename(self.batch_rename_files,self.rename_pattern.text(),self.rename_start.value(),self.rename_padding.value(),self.rename_prefix.text(),self.rename_suffix.text())
+
+    def _preview_batch_rename(self):
+        if not self.batch_rename_files: return
+        plan=self._batch_rename_plan(); self.batch_rename_list.clear(); self.batch_rename_list.addItems([f"{a}  →  {b}" for a,b in plan])
+
+    def _apply_batch_rename_panel(self):
+        if not self.batch_rename_files: return
+        try:
+            from processors.parity import apply_batch_rename
+            outputs=apply_batch_rename(self.batch_rename_files,self.rename_pattern.text(),self.rename_start.value(),self.rename_padding.value(),self.rename_prefix.text(),self.rename_suffix.text())
+            self.batch_rename_files=outputs; self._preview_batch_rename(); self.statusBar().showMessage(f"已重命名 {len(outputs)} 个文件",4000)
+        except Exception as e: QMessageBox.warning(self,"重命名失败",str(e))
 
     def _build_parity_panel(self) -> None:
         self._clear_right()
@@ -2259,18 +2392,18 @@ class MainWindow(QMainWindow):
         feature_ops = {
             "ai-tools": "__ui_15", "apng-tools": "apng", "archive-tools": "archive",
             "ascii-art": "ascii", "audio-cover-extractor": "audio-cover", "base64-tools": "base64-encode",
-            "batch-rename": "batch-rename", "checksum-tools": "checksum", "cipher": "encrypt",
+            "batch-rename": "__panel_batch_rename", "checksum-tools": "checksum", "cipher": "encrypt",
             "code-preview": "code-preview", "collage-maker": "collage", "color-library": "palette",
             "color-tools": "color-sample", "compression-lab": "compress", "curves": "curves",
             "delete-exif": "strip-exif", "document-scanner": "document-scan", "draw": "annotate",
-            "duplicate-finder": "duplicate-finder", "edit-exif": "edit-exif", "fractal-generation": "fractal",
+            "duplicate-finder": "duplicate-finder", "edit-exif": "edit-exif", "fractal-generation": "__panel_fractal",
             "image-cutting": "cut", "image-splitting": "split-grid", "image-stacking": "stack",
             "jxl-tools": "jxl", "limits-resize": "limits-resize", "load-net-image": "load-net-image",
-            "markup-layers": "annotate", "mesh-gradients": "mesh-gradient", "multi-frame-fusion": "fusion",
+            "markup-layers": "annotate", "mesh-gradients": "__panel_mesh", "multi-frame-fusion": "__panel_fusion",
             "noise-generation": "noise-generate", "palette-pdf": "palette-pdf", "palette-tools": "palette",
-            "photomosaic": "photomosaic", "pick-color": "color-sample", "quick-tiles": "quick-tiles",
+            "photomosaic": "__panel_mosaic", "pick-color": "color-sample", "quick-tiles": "quick-tiles",
             "recognize-text": "ocr", "resize-convert": "convert", "scan-qr-code": "qr",
-            "shader-studio": "shader", "svg-maker": "svg-make", "texture-generation": "texture",
+            "shader-studio": "__panel_shader", "svg-maker": "__panel_svg", "texture-generation": "__panel_texture",
             "wallpapers-export": "wallpaper", "webp-tools": "webp", "weight-resize": "weight-resize",
             "watermarking": "watermark", "compare": "compare", "crop": "auto-crop",
             "erase-background": "__ui_10", "filters": "__ui_1", "format-conversion": "convert",
@@ -2368,8 +2501,11 @@ class MainWindow(QMainWindow):
 
     def _run_parity_operation(self, key: str) -> None:
         if key and key.startswith("__ui_"):
-            self._select_tool(int(key.rsplit("_", 1)[1]))
-            return
+            self._select_tool(int(key.rsplit("_", 1)[1])); return
+        if key and key.startswith("__panel_"):
+            panel = key.removeprefix("__panel_")
+            builders = {"batch_rename": self._build_batch_rename_panel, "fractal": lambda:self._build_creator_panel("fractal"), "texture": lambda:self._build_creator_panel("texture"), "mesh": lambda:self._build_creator_panel("mesh"), "shader": lambda:self._build_creator_panel("shader"), "svg": lambda:self._build_creator_panel("svg"), "mosaic": lambda:self._build_creator_panel("mosaic"), "fusion": lambda:self._build_creator_panel("fusion"), "animation": lambda:self._build_creator_panel("animation")}
+            if panel in builders: builders[panel](); return
         try:
             src = self._parity_input()
             if not src and key not in {"base64-decode", "load-net-image", "code-preview", "apng", "quick-tiles"}:
