@@ -1,0 +1,16 @@
+PySide6>=6.6
+numpy>=1.24
+opencv-python-headless>=4.8
+Pillow>=10.0
+scikit-image>=0.22
+imageio>=2.33
+pillow-heif>=0.17
+pillow-avif-plugin>=1.6
+pillow-jxl-plugin>=1.3
+pypdf>=4.0
+pdf2image>=1.17
+pytesseract>=0.3
+colorthief>=0.2
+cryptography>=43.0
+reportlab>=4.0
+mutagen>=1.47
