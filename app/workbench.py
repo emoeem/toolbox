@@ -5,7 +5,7 @@ from typing import Callable
 from threading import Event
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot, Qt
-from PySide6.QtWidgets import QDockWidget, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QProgressBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QProgressBar, QVBoxLayout, QWidget
 
 
 class TaskSignals(QObject):
@@ -92,13 +92,47 @@ class LogWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.editor = QPlainTextEdit(); self.editor.setReadOnly(True)
-        self.filter = QLabel("运行日志")
-        clear = QPushButton("清空"); clear.clicked.connect(self.editor.clear)
-        top = QHBoxLayout(); top.addWidget(self.filter); top.addStretch(); top.addWidget(clear)
+        self._messages: list[str] = []
+        self.filter_input = QLineEdit(); self.filter_input.setPlaceholderText("搜索日志…")
+        self.filter_input.textChanged.connect(self._refresh)
+        self.level_filter = QLineEdit(); self.level_filter.setPlaceholderText("级别（INFO/WARN/ERROR）")
+        self.level_filter.textChanged.connect(self._refresh)
+        clear = QPushButton("清空"); clear.clicked.connect(self.clear)
+        export_txt = QPushButton("导出 TXT"); export_txt.clicked.connect(lambda: self.export("txt"))
+        export_json = QPushButton("导出 JSON"); export_json.clicked.connect(lambda: self.export("json"))
+        self.auto_scroll = QCheckBox("自动滚动"); self.auto_scroll.setChecked(True)
+        top = QHBoxLayout(); top.addWidget(self.filter_input, 2); top.addWidget(self.level_filter, 1); top.addWidget(self.auto_scroll); top.addWidget(export_txt); top.addWidget(export_json); top.addWidget(clear)
         layout = QVBoxLayout(self); layout.addLayout(top); layout.addWidget(self.editor)
 
     def log(self, message: str):
-        self.editor.appendPlainText(message)
+        self._messages.append(str(message))
+        self._refresh()
+
+    def clear(self):
+        self._messages.clear(); self.editor.clear()
+
+    def filtered_messages(self) -> list[str]:
+        query = self.filter_input.text().strip().lower()
+        level = self.level_filter.text().strip().lower()
+        return [m for m in self._messages if (not query or query in m.lower()) and (not level or level in m.lower())]
+
+    def _refresh(self):
+        self.editor.setPlainText("\n".join(self.filtered_messages()))
+        if self.auto_scroll.isChecked():
+            cursor = self.editor.textCursor(); cursor.movePosition(cursor.MoveOperation.End); self.editor.setTextCursor(cursor)
+
+    def export(self, kind: str, path: str | None = None) -> str | None:
+        if path is None:
+            suffix = ".json" if kind == "json" else ".txt"
+            path, _ = QFileDialog.getSaveFileName(self, "导出运行日志", "toolbox-log" + suffix, f"{kind.upper()} (*{suffix})")
+        if not path: return None
+        from pathlib import Path
+        if kind == "json":
+            import json
+            Path(path).write_text(json.dumps(self._messages, ensure_ascii=False, indent=2), encoding="utf-8")
+        else:
+            Path(path).write_text("\n".join(self._messages) + ("\n" if self._messages else ""), encoding="utf-8")
+        return path
 
 
 def make_dock(title: str, widget: QWidget, parent: QWidget) -> QDockWidget:
