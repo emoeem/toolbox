@@ -393,3 +393,26 @@ QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 uv run python -c 'from PySide6.QtWid
 - Crop 0×0：当前实现存在 falsy 参数导致的范围语义问题。
 - SVG Maker 0×0：生成 `viewBox=0 0 0 0`。
 - Shader CPU 的 Grayscale/Tint 名义 preset 没有对应执行分支。
+
+## 12. 第三轮执行记录（2026-09-23）
+
+| 模块 | 测试方式 | 结果 | 证据 |
+|---|---|---|---|
+| Shader CPU | 已知像素 + Grayscale/Tint/Invert 数值断言 | 通过 | tests/test_parity.py；commit 96ee29f |
+| Fractal | 0×0、0 iterations | 通过，明确 ValueError | tests/test_parity.py；2b34d3a |
+| Crop | width/height=0 | 通过，明确 ValueError | tests/test_parity.py；2e961f6 |
+| SVG Maker | width/height=0 | 通过，明确 ValueError | tests/test_parity.py；7cac261 |
+| Cancellation | pre-cancel processor、Task cancelled signal | 通过 | tests/test_workbench.py；52cc788 |
+| G'MIC cancellation | 子进程 terminate/kill + 未完成输出删除 | 已实现；真实 G'MIC 中途取消未宣称实测 | processors/gmic.py |
+| Filters | 前 100 个固定输入抽样 | 100/100 通过 | 2026-09-23 实测输出；9616831、92b713b、01f2ae7 |
+| Draw / Markup | processor 层 annotate | 可执行；真实“画一笔/加一层/导出”GUI 未验证 | tests/test_parity.py；待真机 |
+| Shader Studio | library save/delete + import/export 代码路径 | 代码路径存在；真实 GUI/分享路径未验证 | app/panels/shader_studio.py；待真机 |
+| Help / Libraries / Media Picker / Root / Main | offscreen/static | 未完成真实交互验证 | 待真机 |
+| 快速连点/关闭窗口 | 真实 GUI | 未验证 | 当前无真实显示会话 |
+
+### 当前回归基线
+
+- QT_QPA_PLATFORM=offscreen uv run python -m unittest discover -s tests → 45 tests OK
+- uvx ruff check . → All checks passed
+- 真实 X11/Wayland GUI → 待用户真机验证，承接消息没有填写实际结果。
+

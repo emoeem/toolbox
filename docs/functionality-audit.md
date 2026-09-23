@@ -407,3 +407,61 @@ offscreen 已实际验证：菜单 `文件/视图/编辑/工具/帮助`；Dock `
 - Shader CPU `grayscale` / `tint` 名义 preset 与执行器不一致。
 - 完整 577 filters 仍未逐项验证；night_vision 已修复。
 - 真正处理中取消/关闭窗口仍未完成真实 GUI 验证。
+
+## 16. 第三轮执行结果（2026-09-23）
+
+### 阶段 0：真机验证回写
+
+承接消息中的“用户真机验证结果”字段仍为空，因此本轮没有新增任何真实 X11/Wayland GUI 通过项，也没有伪造用户操作结果。远程环境仍不具备真实显示会话。
+
+### 阶段 1：Shader CPU P0
+
+- 文件：processors/parity.py:514
+- 修复前：shader_cpu() 只实现 invert/posterize/scanlines/vignette；grayscale、tint 落入默认 b=a，属于核心功能空实现。
+- 修复后：Grayscale 使用 0.299R + 0.587G + 0.114B；Tint 使用默认粉色目标 (1.0,0.25,0.7) 并由 strength 控制混合，同时支持显式 tint_color。
+- 数值回归：输入 (100,150,200)，Grayscale 输出三通道相同且符合公式；Tint 输出 (255,63,178)；Invert/Grayscale/Tint 三者两两不同。
+- commit：96ee29f fix: implement grayscale and tint cpu shaders
+
+### 阶段 2：破坏性测试新 bug
+
+- Fractal：generate_fractal() 现在拒绝宽/高/iterations < 1，使用明确 ValueError；commit 2b34d3a fix: validate fractal dimensions。
+- Crop：cut_image() 不再用 width or ... / height or ... 吞掉 0；显式拒绝 0 和负数；commit 2e961f6 fix: crop zero dimension handling。
+- SVG Maker：svg_make() 拒绝 0×0 及负尺寸；commit 7cac261 fix: reject zero svg dimensions。
+
+### 阶段 3：协作式取消
+
+新增 processors/cancellation.py 的 CancelToken / CancelledError。
+
+已接入：
+- QThreadPool Task：向支持双参数 worker 注入 token；取消后发出 cancelled，状态为“已取消”。
+- Fractal：每轮迭代检查 token，取消时不写输出文件。
+- G'MIC：轮询子进程；取消时 terminate，超时 kill，并删除未完成输出。
+
+当前仍不能宣称所有 processor 都支持中途取消。单次不可拆分的 Pillow/OpenCV 操作只能在开始/结束边界检查；OCR 当前也未改造成可终止的底层进程。关闭窗口、快速连续点击的真实 GUI 取消矩阵仍待真机验证。
+
+回归：45 tests 全部通过，Ruff 全部通过。
+commit：52cc788 feat: cooperative cancellation for long running processors
+
+### 阶段 4：Filters 抽样
+
+对 ALL_FILTERS 前 100 项使用 64×64 RGB 固定输入逐项实际执行：100/100 通过，0 失败。抽样过程中发现并修复 4 项 OpenCV 兼容 bug：
+- swirl remap map 必须为 float32：9616831
+- bulge/pinch/glass_sphere remap map 必须为 float32：92b713b
+- crt_curvature 使用不存在的 cv2.BORDER_BLACK，改为 BORDER_CONSTANT：01f2ae7
+
+这只是至少 100 项抽样证据，不等价于 577 项全量通过；但 Filters 已从“未验证”升级为 usable。其余 GUI 未验证项仍保持未验证。
+
+### 当前等级
+
+- usable：56
+- runnable：0
+- equivalent：0
+- 未验证：9
+- placeholder：2
+- 总计：67
+
+未验证：draw、markup-layers、shader-studio、help、libraries-info、library-details、main、media-picker、root。
+
+### Equivalent
+
+Shader CPU 三个命名 effect 已补齐，但 Shader Studio 仍不能升级 equivalent：真实 OpenGL GUI 尚未真机验证，且参考项目是通用 Shader preset 编辑器，当前桌面实现的交互/参数/分享路径尚未完成逐项对照。因此 equivalent 保持 0，不为数字放宽标准。

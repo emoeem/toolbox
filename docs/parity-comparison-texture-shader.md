@@ -87,3 +87,17 @@ ImageToolbox 的 `shader-studio` 是**通用 Shader 编辑器/预览器**：
 - `equivalent`：**0 → 0**。
 
 原因不是“差一点也算”，而是两项都存在明确未覆盖或未验证的硬条件。
+
+## 第三轮修复后的 Shader CPU 复核（2026-09-23）
+
+本轮禁止继续沿用“参考项目没有定义所以可以不实现”的结论。Toolbox 当前命名的三个 effect 已有真实 CPU 执行分支，并进行了数值断言：
+
+| Effect | CPU 实现 | 数值验证 | 当前结论 |
+|---|---|---|---|
+| Color Invert | 1-R/G/B | 已验证 | CPU effect 可用 |
+| Grayscale | 0.299R + 0.587G + 0.114B | 输入 (100,150,200) → 三通道相同 | CPU effect 可用 |
+| Tint | 输入与默认粉色目标按 strength 混合 | strength=1 → (255,63,178) | CPU effect 可用 |
+
+三项输出在固定彩色输入上两两不同。对应修复 commit：96ee29f。
+
+但这仍不足以把 Shader Studio 标成 equivalent。原因是等价标准还要求参数、边界、输出一致性、交互一致性全部成立；当前真实 OpenGL GUI、导入/导出/删除/分享的真机闭环以及与参考通用 shader 编辑器的逐项行为对照尚未完成。因此 equivalent 继续保持 0。
