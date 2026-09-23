@@ -670,7 +670,9 @@ def crt_curvature(img: np.ndarray) -> np.ndarray:
     dy = ny ** 2 * 0.15
     src_x = cx + (nx + dx) * cx
     src_y = cy + (ny + dy) * cy
-    result = cv2.remap(img_, src_x, src_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_BLACK)
+    src_x = src_x.astype(np.float32)
+    src_y = src_y.astype(np.float32)
+    result = cv2.remap(img_, src_x, src_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
     scanlines = np.ones((h, 1), dtype=np.float32)
     scanlines[::2] = 0.85
     result = (result.astype(np.float32) * scanlines[..., None]).astype(np.uint8)

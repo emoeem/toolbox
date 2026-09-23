@@ -2,6 +2,13 @@
 import numpy as np
 from processors.filters import apply_filter
 
+def test_crt_curvature_uses_supported_border_mode():
+    img = np.arange(32 * 32 * 3, dtype=np.uint8).reshape(32, 32, 3)
+    out = apply_filter("crt_curvature", img)
+    assert out.shape == img.shape
+    assert out.dtype == np.uint8
+
+
 def test_remap_geometry_filters_use_float32_maps():
     img = np.arange(32 * 32 * 3, dtype=np.uint8).reshape(32, 32, 3)
     for key in ("swirl", "bulge", "pinch", "glass_sphere"):
