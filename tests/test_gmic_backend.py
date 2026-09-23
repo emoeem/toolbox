@@ -8,6 +8,11 @@ class GmicTests(unittest.TestCase):
   b=GMICBackend(); self.assertTrue(b.is_available()); self.assertIn('Version',b.get_version())
  def test_cli_run(self):
   b=GMICBackend(timeout=5); r=b.run('-input','16,16,1,1','-noise','5'); self.assertEqual(r.returncode,0)
+ def test_missing_binary_version_is_safe(self):
+  class No(GMICBackend):
+   def __init__(self): super().__init__(path="/nonexistent/gmic")
+  b=No(); self.assertFalse(b.is_available()); self.assertEqual(b.get_version(), "")
+
  def test_unavailable_fallback(self):
   class No(GMICBackend):
    def __init__(self): super().__init__(path='/nonexistent/gmic')

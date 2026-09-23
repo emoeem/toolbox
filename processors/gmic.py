@@ -12,6 +12,8 @@ def available() -> bool:
 
 
 def version() -> str:
+    if not available():
+        return ""
     p = subprocess.run(["gmic", "-version"], capture_output=True, text=True)
     m = re.search(r"Version\s+([0-9.]+)", p.stdout)
     return m.group(1) if m else "unknown"
