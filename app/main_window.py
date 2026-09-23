@@ -287,13 +287,20 @@ class MainWindow(QMainWindow):
         recent=QCheckBox("启用最近文件记录"); recent.setChecked(self._settings.value("files/recent",True,type=bool)); gf.addRow("文件:",recent)
         tabs.addTab(general,"常规")
         backends=QWidget(); bl=QVBoxLayout(backends); backend_table=QListWidget()
-        from backends.registry import inspect_backends
-        infos=inspect_backends({'GMIC':14})
-        for info in infos: backend_table.addItem(f"{'✓' if info.available else '✗'} {info.name} | {info.version or '不可用'} | {info.path or '未找到'} | 使用 {info.usage}")
+        from backends.registry import INSTALL_HINTS, inspect_backends
+        def refresh_backends():
+            backend_table.clear()
+            for info in inspect_backends({'GMIC':14}):
+                if info.available:
+                    text=f"✓ {info.name} | {info.version or '已安装'} | {info.path or 'PATH'} | 使用 {info.usage}"
+                else:
+                    text=f"✗ {info.name} | 后端不可用 | {INSTALL_HINTS.get(info.name, '请安装对应后端')}"
+                backend_table.addItem(text)
         bl.addWidget(backend_table)
-        refresh=QPushButton('刷新 GMIC filter 缓存'); bl.addWidget(refresh)
+        refresh_status=QPushButton('刷新后端状态'); bl.addWidget(refresh_status); refresh_status.clicked.connect(refresh_backends); refresh_backends()
+        refresh_gmic=QPushButton('刷新 GMIC filter 缓存'); bl.addWidget(refresh_gmic)
         from backends.gmic_backend import GMICBackend
-        refresh.clicked.connect(lambda: (GMICBackend().refresh_filters(), self.statusBar().showMessage('GMIC filter 缓存已刷新',2500)))
+        refresh_gmic.clicked.connect(lambda: (GMICBackend().refresh_filters(), self.statusBar().showMessage('GMIC filter 缓存已刷新',2500)))
         tabs.addTab(backends,'后端状态')
         about=QWidget(); al=QVBoxLayout(about); al.addWidget(QLabel("Toolbox 桌面图像工具箱")); al.addWidget(QLabel("配置使用 Qt QSettings 持久化，不改变现有处理器 API。")); tabs.addTab(about,"关于")
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel|QDialogButtonBox.RestoreDefaults); layout.addWidget(buttons)
