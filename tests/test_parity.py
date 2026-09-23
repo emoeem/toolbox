@@ -72,6 +72,17 @@ class ParityProcessorTests(unittest.TestCase):
             parity.annotate(str(src), str(out), [{"type":"line","width":2}])
             self.assertEqual(Image.open(out).size, (32,32))
 
+    def test_erase_background_mapping_no_keyerror(self):
+        with tempfile.TemporaryDirectory() as td:
+            src=Path(td)/"in.png"; out=Path(td)/"out.png"
+            Image.new("RGBA", (16,16), (10,20,30,255)).save(src)
+            original=parity.erase_background
+            try:
+                parity.erase_background=lambda *args, **kwargs: str(out)
+                self.assertEqual(parity.run_parity_tool("background-remove", path=str(src), output=str(out)), str(out))
+            finally:
+                parity.erase_background=original
+
     def test_batch_rename_rejects_collisions(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); a=root/"a.png"; b=root/"b.png"; a.write_bytes(b"a"); b.write_bytes(b"b")
