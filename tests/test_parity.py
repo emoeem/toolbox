@@ -105,6 +105,10 @@ class ParityProcessorTests(unittest.TestCase):
             with self.assertRaises(ValueError): parity.resize_with_limits(str(src), str(out), 0, 16)
             with self.assertRaises(ValueError): parity.resize_with_limits(str(src), str(out), 16, 0)
 
+    def test_noise_rejects_invalid_kind(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ValueError): parity.generate_noise(str(Path(td)/"bad.png"), 16, 16, kind="invalid")
+
     def test_batch_rename_rejects_collisions(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); a=root/"a.png"; b=root/"b.png"; a.write_bytes(b"a"); b.write_bytes(b"b")
