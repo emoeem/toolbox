@@ -98,6 +98,20 @@ class ParityProcessorTests(unittest.TestCase):
             finally:
                 parity.erase_background=original
 
+    def test_shader_cpu_grayscale_and_tint_use_numeric_formulas(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td); src=root/"in.png"
+            Image.new("RGB",(1,1),(100,150,200)).save(src)
+            expected_gray=int(0.299*100+0.587*150+0.114*200)
+            gray=root/"gray.png"; parity.shader_cpu(str(src),str(gray),"grayscale",1.0)
+            self.assertEqual(Image.open(gray).getpixel((0,0)),(expected_gray,)*3)
+            tint=root/"tint.png"; parity.shader_cpu(str(src),str(tint),"tint",1.0)
+            self.assertEqual(Image.open(tint).getpixel((0,0)),(255,63,178))
+            inv=root/"inv.png"; parity.shader_cpu(str(src),str(inv),"invert",1.0)
+            self.assertNotEqual(Image.open(gray).getpixel((0,0)),Image.open(tint).getpixel((0,0)))
+            self.assertNotEqual(Image.open(gray).getpixel((0,0)),Image.open(inv).getpixel((0,0)))
+            self.assertNotEqual(Image.open(tint).getpixel((0,0)),Image.open(inv).getpixel((0,0)))
+
     def test_limits_resize_rejects_zero_dimensions(self):
         with tempfile.TemporaryDirectory() as td:
             src=Path(td)/"in.png"; out=Path(td)/"out.png"

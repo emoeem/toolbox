@@ -511,9 +511,15 @@ def mesh_gradient(output: str, width=1024, height=1024, colors=None) -> str:
     Image.fromarray(np.uint8(np.clip(a,0,255))).save(output); return output
 
 
-def shader_cpu(path: str, output: str, effect="invert", strength=1.0) -> str:
+def shader_cpu(path: str, output: str, effect="invert", strength=1.0, tint_color=(1.0, 0.25, 0.7)) -> str:
     im=Image.open(path).convert("RGB"); a=np.asarray(im,dtype=np.float32)/255
     if effect=="invert": b=1-a
+    elif effect=="grayscale":
+        y=0.299*a[...,0] + 0.587*a[...,1] + 0.114*a[...,2]
+        b=np.repeat(y[...,None], 3, axis=2)
+    elif effect=="tint":
+        color=np.asarray(tint_color,dtype=np.float32).reshape(1,1,3)
+        b=np.broadcast_to(color,a.shape)
     elif effect=="posterize": b=np.round(a*4)/4
     elif effect=="scanlines": b=a*(0.75+0.25*((np.arange(a.shape[0])[:,None]%4)<2))
     elif effect=="vignette":
