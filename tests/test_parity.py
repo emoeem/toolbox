@@ -58,6 +58,13 @@ class ParityProcessorTests(unittest.TestCase):
                     expected = {"median": 80, "mean": 80, "max": 120, "min": 40}[mode]
                     self.assertEqual(image.getpixel((0,0)), (expected, expected, expected))
 
+    def test_svg_maker_defaults_missing_width(self):
+        with tempfile.TemporaryDirectory() as td:
+            out=Path(td)/"out.svg"
+            parity.svg_make(str(out), 64, 48, shapes=[{"type":"rect","x":2,"y":3,"height":10}])
+            self.assertTrue(out.stat().st_size > 0)
+            self.assertIn("width=\"62\"", out.read_text())
+
     def test_batch_rename_rejects_collisions(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); a=root/"a.png"; b=root/"b.png"; a.write_bytes(b"a"); b.write_bytes(b"b")
