@@ -471,8 +471,14 @@ def svg_make(output: str, width=1024, height=1024, background="#ffffff", shapes=
     shapes=shapes or []
     body=[f'<rect width="100%" height="100%" fill="{background}"/>']
     for s in shapes:
-        if s.get("type")=="circle": body.append(f'<circle cx="{s["cx"]}" cy="{s["cy"]}" r="{s["r"]}" fill="{s.get("fill","#000")}"/>')
-        elif s.get("type")=="rect": body.append(f'<rect x="{s["x"]}" y="{s["y"]}" width="{s["w"]}" height="{s["h"]}" rx="{s.get("rx",0)}" fill="{s.get("fill","#000")}"/>')
+        typ=s.get("type","rect")
+        if typ=="circle":
+            cx=float(s.get("cx",width/2)); cy=float(s.get("cy",height/2)); r=max(0.0,float(s.get("r",min(width,height)/4)))
+            body.append(f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" fill="{s.get("fill","#000")}"/>')
+        elif typ=="rect":
+            x=float(s.get("x",0)); y=float(s.get("y",0)); w=float(s.get("w",s.get("width",width-x))); h=float(s.get("h",s.get("height",height-y)))
+            if w<=0 or h<=0: raise ValueError("SVG rect width and height must be positive")
+            body.append(f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" rx="{float(s.get("rx",0)):g}" fill="{s.get("fill","#000")}"/>')
         elif s.get("type")=="text": body.append(f'<text x="{s["x"]}" y="{s["y"]}" font-size="{s.get("size",48)}" fill="{s.get("fill","#000")}">{s.get("text","")}</text>')
     Path(output).write_text(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">{"".join(body)}</svg>',encoding="utf-8")
     return output

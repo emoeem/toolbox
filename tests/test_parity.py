@@ -17,6 +17,13 @@ class ParityProcessorTests(unittest.TestCase):
         self.assertEqual(audit["levels"], {"placeholder": 2, "usable": 44, "equivalent": 0, "未验证": 21})
         self.assertEqual({f["level"] for f in audit["features"]}, {"placeholder", "usable", "未验证"})
 
+    def test_svg_maker_defaults_missing_rect_width(self):
+        with tempfile.TemporaryDirectory() as td:
+            out=Path(td)/"design.svg"
+            parity.svg_make(str(out), 64, 48, shapes=[{"type":"rect","x":4,"y":5}])
+            self.assertGreater(out.stat().st_size, 0)
+            self.assertIn('<rect', out.read_text())
+
     def test_generators_create_valid_images(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
