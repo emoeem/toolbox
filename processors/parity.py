@@ -566,14 +566,6 @@ def erase_background(path: str, output: str, model="u2net", backend="auto") -> s
     return output
 
 
-def erase_background(path: str, output: str, model="u2net", backend="auto") -> str:
-    from .ai import remove_background
-    from .utils import np_to_pil
-    result = remove_background(np.asarray(Image.open(path).convert("RGBA")), model=model, backend=backend)
-    np_to_pil(result).save(output)
-    return output
-
-
 def run_parity_tool(tool: str, **kwargs):
     mapping={
         "duplicate-finder":find_duplicates,"image-info":image_info,"base64-encode":base64_encode,"base64-decode":base64_decode,"archive":archive_images,
@@ -589,7 +581,7 @@ def run_parity_tool(tool: str, **kwargs):
         "animation-format":convert_animation_format,"jxl":jxl_convert,"ocr":ocr_to_file,
         "fusion":multi_frame_fusion,"color-sample":color_sample,"color-replace":color_replace,
         "colorize":colorize_gradient,"svg-make":svg_make,"texture":texture_generate,"mesh-gradient":mesh_gradient,
-        "shader":shader_cpu,"audio-cover":extract_audio_cover,"wallpaper":wallpaper_export,"annotate":annotate,"background-remove":erase_background,"background-remove":erase_background,
+        "shader":shader_cpu,"audio-cover":extract_audio_cover,"wallpaper":wallpaper_export,"annotate":annotate,"background-remove":erase_background,
     }
     fn=mapping.get(tool)
     if fn is None: raise KeyError(tool)

@@ -13,11 +13,6 @@ class GmicTests(unittest.TestCase):
    def __init__(self): super().__init__(path="/nonexistent/gmic")
   b=No(); self.assertFalse(b.is_available()); self.assertEqual(b.get_version(), "")
 
- def test_missing_binary_version_is_safe(self):
-  b=GMICBackend(path='/nonexistent/gmic')
-  self.assertFalse(b.is_available())
-  self.assertEqual(b.get_version(),'')
-
  def test_unavailable_fallback(self):
   class No(GMICBackend):
    def __init__(self): super().__init__(path='/nonexistent/gmic')
