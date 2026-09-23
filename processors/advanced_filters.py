@@ -595,7 +595,7 @@ def night_vision(img: np.ndarray, intensity: float = 1.5) -> np.ndarray:
     import cv2
     img_ = ensure_rgb(img).astype(np.uint8)
     gray = cv2.cvtColor(img_, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    edges = cv2.Laplacian(gray, cv2.CV_64F)
+    edges = cv2.Laplacian(gray, cv2.CV_32F)
     edges = np.abs(edges) * intensity
     result = np.zeros((gray.shape[0], gray.shape[1], 3), dtype=np.float32)
     result[..., 1] = np.clip(gray * 0.8 + edges, 0, 255)
