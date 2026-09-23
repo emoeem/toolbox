@@ -3,8 +3,10 @@ from __future__ import annotations
 from time import monotonic
 from typing import Callable
 from threading import Event
+import inspect
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot, Qt
+from processors.cancellation import CancelToken, CancelledError
 from PySide6.QtWidgets import QCheckBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QProgressBar, QVBoxLayout, QWidget
 
 
@@ -13,6 +15,7 @@ class TaskSignals(QObject):
     status = Signal(str)
     finished = Signal(object)
     failed = Signal(str)
+    cancelled = Signal()
 
 
 class Task(QRunnable):
@@ -21,7 +24,8 @@ class Task(QRunnable):
         self.name = name
         self.fn = fn
         self.signals = TaskSignals()
-        self.cancel_event = Event()
+        self.cancel_token = CancelToken()
+        self.cancel_event = self.cancel_token.event
         self.pause_event = Event(); self.pause_event.set()
         self.setAutoDelete(True)
 
@@ -34,15 +38,20 @@ class Task(QRunnable):
 
     def pause(self): self.pause_event.clear()
     def resume(self): self.pause_event.set()
-    def cancel(self): self.cancel_event.set(); self.pause_event.set()
+    def cancel(self): self.cancel_token.cancel(); self.pause_event.set()
 
     @Slot()
     def run(self):
         started = monotonic()
         try:
-            result = self.fn(self._progress)
+            params = inspect.signature(self.fn).parameters
+            result = self.fn(self._progress, self.cancel_token) if len(params) >= 2 else self.fn(self._progress)
+            self.cancel_token.raise_if_cancelled()
             self.signals.finished.emit(result)
             self.signals.status.emit(f"完成 · {monotonic() - started:.1f}s")
+        except CancelledError:
+            self.signals.cancelled.emit()
+            self.signals.status.emit(f"已取消 · {monotonic() - started:.1f}s")
         except Exception as exc:
             self.signals.failed.emit(str(exc))
             self.signals.status.emit(f"失败 · {monotonic() - started:.1f}s")
@@ -77,7 +86,9 @@ class TaskQueueWidget(QWidget):
         task.signals.progress.connect(bar.setValue)
         task.signals.status.connect(lambda text: label.setText(f"{name} · {text}"))
         task.signals.failed.connect(lambda err: label.setText(f"{name} · 失败: {err}"))
+        task.signals.cancelled.connect(lambda: label.setText(f"{name} · 已取消"))
         task.signals.finished.connect(lambda _result: (pause.setEnabled(False),cancel.setEnabled(False)))
+        task.signals.cancelled.connect(lambda: (pause.setEnabled(False),cancel.setEnabled(False)))
         self.pool.start(task); return task
 
     def _clear_done(self):

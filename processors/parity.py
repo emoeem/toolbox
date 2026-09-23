@@ -8,6 +8,8 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageColor
 import numpy as np
 
+from .cancellation import CancelToken
+
 
 def base64_encode(path: str, output: str) -> str:
     Path(output).write_text(base64.b64encode(Path(path).read_bytes()).decode(), encoding="utf-8")
@@ -215,7 +217,7 @@ def generate_noise(output,width=1024,height=1024,amount=1.0,kind="gaussian"):
     else: arr=np.random.normal(127,70*amount,(height,width,3))
     Image.fromarray(np.clip(arr,0,255).astype(np.uint8)).save(output); return output
 
-def generate_fractal(output,width=1024,height=768,iterations=80,center=(-0.7435,0.1314),scale=3.0):
+def generate_fractal(output,width=1024,height=768,iterations=80,center=(-0.7435,0.1314),scale=3.0,cancel_token: CancelToken | None = None):
     width, height, iterations = int(width), int(height), int(iterations)
     if width < 1 or height < 1:
         raise ValueError("fractal width and height must be at least 1")
@@ -224,7 +226,11 @@ def generate_fractal(output,width=1024,height=768,iterations=80,center=(-0.7435,
     x0,y0=center; xs=np.linspace(x0-scale/2,x0+scale/2,width); ys=np.linspace(y0-scale/2*height/width,y0+scale/2*height/width,height)
     X,Y=np.meshgrid(xs,ys); C=X+1j*Y; Z=np.zeros_like(C); out=np.zeros(C.shape,dtype=np.uint16); alive=np.ones(C.shape,bool)
     for i in range(iterations):
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
         Z[alive]=Z[alive]**2+C[alive]; escaped=np.abs(Z)>2; out[escaped & alive]=i; alive &= ~escaped
+    if cancel_token is not None:
+        cancel_token.raise_if_cancelled()
     v=np.clip(out/ max(1,iterations-1)*255,0,255).astype(np.uint8); rgb=np.stack([v,np.roll(v,32,1),np.roll(v,64,0)],axis=2); Image.fromarray(rgb).save(output); return output
 
 def apply_curves(path, output, points=((0,0),(64,48),(128,150),(192,220),(255,255))):
