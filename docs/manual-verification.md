@@ -310,3 +310,48 @@ uv build --out-dir /tmp/toolbox-build
 ```
 
 预期：同时生成 `.tar.gz` 与 `.whl`；验证后可删除临时目录。
+
+
+## 9. 本轮补充验证清单（2026-09-23）
+
+### P0 修复
+
+- SVG Maker：缺少 rect `w`/width 时导出仍成功，检查 SVG 非空且 width 使用默认值。
+- Draw / Markup：line/text 缺少 `xy` 时不应 `KeyError`，检查输出图片可打开。
+- Erase Background：调用 `background-remove` 不应 `KeyError`；真实 rembg 后端另测。
+- GMIC：`GMICBackend(path="/nonexistent/gmic")` 应 `is_available=False` 且 `get_version()==""`。
+- limits-resize：`max_width=0` 或 `max_height=0` 必须明确报错。
+- noise-generation：`kind=invalid` 必须明确报错；`gaussian` / `uniform` 均应正常生成。
+- weight-resize：`target_kb<1` 必须明确报错。
+
+### P1 功能
+
+1. AI Tools：运行一次真实模型，记录模型/后端、输入尺寸、输出尺寸。
+2. QR：生成 `Toolbox-QA-123`，扫描后必须得到同一字符串。
+3. EXIF：写 tag 270，再读回并比对值。
+4. 网络图片：使用小型公开 PNG URL，记录 HTTP 状态码和输出尺寸。
+5. 设置持久化：进程 A 写值，进程 B 读取，不能只测同一进程。
+6. 任务队列：提交 4 个独立任务，确认 4/4 完成且名称/结果不串扰；另测取消。
+7. 日志：当前实现只有追加/清空，过滤和导出能力未通过本轮审计。
+8. 高 DPI：`QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2` 构造 MainWindow；记录 DPR。
+9. Filters：从当前 `ALL_FILTERS` 抽样 30 项逐项运行；记录每个 key 的结果。任何失败都不能把全部 Filters 标成 usable。
+10. APNG/GIF/WebP/JXL/PDF/Document Scanner/OCR：各运行一个最小用例并检查实际输出文件。
+
+### GUI 真实性
+
+```bash
+printf 'DISPLAY=%s WAYLAND_DISPLAY=%s\n' "$DISPLAY" "$WAYLAND_DISPLAY"
+uv run python main.py
+```
+
+若 DISPLAY 与 WAYLAND_DISPLAY 均为空，只记录为“待用户真机验证”，不得把 offscreen 结果写成真实 GUI 通过。
+
+### 当前回归基线
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run python -m unittest discover -s tests -v
+uvx ruff check .
+QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 uv run python -c 'from PySide6.QtWidgets import QApplication; from app.main_window import MainWindow; a=QApplication([]); w=MainWindow(); print(a.devicePixelRatio()); w.close()'
+```
+
+本轮实际结果：36 tests 全部通过；Ruff `All checks passed!`；DPR=2.0 构造成功。
