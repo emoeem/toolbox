@@ -422,8 +422,8 @@ def swirl(img: np.ndarray, strength: float = 1.0) -> np.ndarray:
     angle = strength * (1 - dist / max_dist) * 6
     cos_a = np.cos(angle)
     sin_a = np.sin(angle)
-    src_x = cx + dx * cos_a - dy * sin_a
-    src_y = cy + dx * sin_a + dy * cos_a
+    src_x = (cx + dx * cos_a - dy * sin_a).astype(np.float32)
+    src_y = (cy + dx * sin_a + dy * cos_a).astype(np.float32)
     return cv2.remap(img_, src_x, src_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
 
