@@ -29,7 +29,10 @@ def remove_background(img: np.ndarray, model: str = "u2net",
                      alpha_matting: bool = False, post_process: bool = True,
                      backend: str = "auto") -> np.ndarray:
     from PIL import Image
-    from rembg import remove
+    try:
+        from rembg import remove
+    except ImportError as exc:
+        raise RuntimeError("rembg 后端不可用，请安装 rembg[cli] 和 onnxruntime") from exc
     from .utils import np_to_pil, pil_to_np
     pil = np_to_pil(ensure_rgb(img))
     sess = _rembg_session(model, backend)
