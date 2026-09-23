@@ -65,6 +65,13 @@ class ParityProcessorTests(unittest.TestCase):
             self.assertTrue(out.stat().st_size > 0)
             self.assertIn("width=\"62\"", out.read_text())
 
+    def test_draw_markup_defaults_missing_xy(self):
+        with tempfile.TemporaryDirectory() as td:
+            src=Path(td)/"in.png"; out=Path(td)/"out.png"
+            Image.new("RGBA", (32,32), (10,20,30,255)).save(src)
+            parity.annotate(str(src), str(out), [{"type":"line","width":2}])
+            self.assertEqual(Image.open(out).size, (32,32))
+
     def test_batch_rename_rejects_collisions(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); a=root/"a.png"; b=root/"b.png"; a.write_bytes(b"a"); b.write_bytes(b"b")
