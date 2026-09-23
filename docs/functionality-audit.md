@@ -465,3 +465,49 @@ commit：52cc788 feat: cooperative cancellation for long running processors
 ### Equivalent
 
 Shader CPU 三个命名 effect 已补齐，但 Shader Studio 仍不能升级 equivalent：真实 OpenGL GUI 尚未真机验证，且参考项目是通用 Shader preset 编辑器，当前桌面实现的交互/参数/分享路径尚未完成逐项对照。因此 equivalent 保持 0，不为数字放宽标准。
+
+
+## 17. 用户真机验证：水印崩溃（2026-09-23）
+
+### 阶段 0 回写
+
+用户实际在真机 GUI 中确认：**GUI 可以启动**，但进入水印相关功能并点击应用后发生崩溃。
+
+已记录的真实 traceback：
+
+- app/main_window.py:963 `_apply_watermark`：`ImportError: cannot import name 'add_text_watermark' from 'processors.filters'`
+- app/main_window.py:975 `_apply_tiled_watermark`：同一 `ImportError`
+
+因此本次真实 GUI 状态不是“通过”，而是：**部分验证，发现水印功能崩溃**。未验证清单中的 GUI 项不得因此自动标记通过。
+
+### Fix 1：缺失文字水印处理器
+
+- 修复文件：`processors/filters.py`
+- 修复前：`main_window.py` 在 963、975 行运行时导入不存在的 `add_text_watermark`，点击功能立即崩溃。
+- 修复后：新增 `add_text_watermark()`，接收图像、文字、归一化 X/Y、字体比例、颜色、不透明度，返回与输入同尺寸的 RGBA `numpy.ndarray`。
+- 字体回退链：用户字体目录 MiSans → Noto Sans CJK → DejaVu Sans → Pillow 默认字体。
+- 中文测试：`测试水印` 实际渲染成功，输出形状/类型正确且像素发生变化。
+- 参数测试：透明度、字号、颜色变化均产生不同输出。
+- commit：`6d778d5 fix: implement missing text watermark processor`
+
+### 阶段 2：同类 import 排查
+
+对 `app/` 全部 Python 文件的 `from processors.* import ...` 做 AST 静态检查，并补充实际模块导入 smoke test。
+
+结果：首次检查发现 11 个“看起来不存在”的符号，其中 10 个是模块级变量/导出常量，静态扫描器最初只识别函数/类导致误报；扩展到函数、类、模块变量后，真正剩余 1 项：`app/panels/shader_studio.py:10` 的 `processors.shader_studio` 包模块解析问题。
+
+进一步检查确认 `processors/shader_studio/__init__.py` 已实际导出 `ShaderLibrary`、`ShaderPreset`、`parse_uniforms`、`validate_glsl`，且实际 import smoke test 已通过。因此没有发现第二个真实的缺失 processor import。
+
+完整静态 import 路径共 54 处，实际 smoke test：`app.main_window`、`app.workbench`、`app.panels.shader_studio`、`app.panels.texture_studio` 均成功导入。
+
+### 阶段 3：防回归
+
+新增 `tests/test_imports.py`：扫描 `app/` 下所有 `from processors.* import ...`，检查目标模块存在、实际 import 成功、目标符号存在。测试纳入现有 `tests` 发现流程。
+
+commit：`1cf1839 test: add import and signature checks`
+
+### 当前真机验证状态
+
+- GUI 启动：**用户已验证通过**
+- 水印单个/平铺：**用户发现崩溃；修复后尚未由用户再次确认**
+- 其他 GUI 模块：仍按原清单保持未验证
