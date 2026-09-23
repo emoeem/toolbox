@@ -208,6 +208,11 @@ def generate_noise(output,width=1024,height=1024,amount=1.0,kind="gaussian"):
     Image.fromarray(np.clip(arr,0,255).astype(np.uint8)).save(output); return output
 
 def generate_fractal(output,width=1024,height=768,iterations=80,center=(-0.7435,0.1314),scale=3.0):
+    width, height, iterations = int(width), int(height), int(iterations)
+    if width < 1 or height < 1:
+        raise ValueError("fractal width and height must be at least 1")
+    if iterations < 1:
+        raise ValueError("fractal iterations must be at least 1")
     x0,y0=center; xs=np.linspace(x0-scale/2,x0+scale/2,width); ys=np.linspace(y0-scale/2*height/width,y0+scale/2*height/width,height)
     X,Y=np.meshgrid(xs,ys); C=X+1j*Y; Z=np.zeros_like(C); out=np.zeros(C.shape,dtype=np.uint16); alive=np.ones(C.shape,bool)
     for i in range(iterations):

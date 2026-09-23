@@ -112,6 +112,13 @@ class ParityProcessorTests(unittest.TestCase):
             self.assertNotEqual(Image.open(gray).getpixel((0,0)),Image.open(inv).getpixel((0,0)))
             self.assertNotEqual(Image.open(tint).getpixel((0,0)),Image.open(inv).getpixel((0,0)))
 
+    def test_fractal_rejects_zero_dimensions(self):
+        with tempfile.TemporaryDirectory() as td:
+            out=Path(td)/"fractal.png"
+            with self.assertRaises(ValueError): parity.generate_fractal(str(out),0,16,10)
+            with self.assertRaises(ValueError): parity.generate_fractal(str(out),16,0,10)
+            with self.assertRaises(ValueError): parity.generate_fractal(str(out),16,16,0)
+
     def test_limits_resize_rejects_zero_dimensions(self):
         with tempfile.TemporaryDirectory() as td:
             src=Path(td)/"in.png"; out=Path(td)/"out.png"
