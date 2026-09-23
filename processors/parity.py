@@ -190,8 +190,16 @@ def resize_with_limits(path, output, max_width=4096, max_height=4096, mode="cont
     im.save(output); return output
 
 def cut_image(path, output, x=0, y=0, width=None, height=None):
-    im=Image.open(path); width=width or im.width-x; height=height or im.height-y
-    im.crop((x,y,x+width,y+height)).save(output); return output
+    im=Image.open(path)
+    if width is not None and int(width) <= 0:
+        raise ValueError("crop width must be greater than 0")
+    if height is not None and int(height) <= 0:
+        raise ValueError("crop height must be greater than 0")
+    width = im.width - int(x) if width is None else int(width)
+    height = im.height - int(y) if height is None else int(height)
+    if width <= 0 or height <= 0:
+        raise ValueError("crop dimensions must be greater than 0")
+    im.crop((int(x),int(y),int(x)+width,int(y)+height)).save(output); return output
 
 def create_gradient(output, width=1200, height=800, start="#8b5cf6", end="#22d3ee", angle=0):
     a=np.array(ImageColor.getrgb(start),dtype=np.float32); b=np.array(ImageColor.getrgb(end),dtype=np.float32)

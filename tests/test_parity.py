@@ -119,6 +119,13 @@ class ParityProcessorTests(unittest.TestCase):
             with self.assertRaises(ValueError): parity.generate_fractal(str(out),16,0,10)
             with self.assertRaises(ValueError): parity.generate_fractal(str(out),16,16,0)
 
+    def test_crop_rejects_zero_dimensions(self):
+        with tempfile.TemporaryDirectory() as td:
+            src=Path(td)/"in.png"; out=Path(td)/"out.png"
+            Image.new("RGB",(16,16),(1,2,3)).save(src)
+            with self.assertRaises(ValueError): parity.cut_image(str(src),str(out),width=0)
+            with self.assertRaises(ValueError): parity.cut_image(str(src),str(out),height=0)
+
     def test_limits_resize_rejects_zero_dimensions(self):
         with tempfile.TemporaryDirectory() as td:
             src=Path(td)/"in.png"; out=Path(td)/"out.png"
