@@ -437,8 +437,8 @@ def bulge(img: np.ndarray, strength: float = 0.5) -> np.ndarray:
     max_dist = np.sqrt(cx ** 2 + cy ** 2)
     r = dist / max_dist
     factor = r ** (1.0 + strength * 2)
-    src_x = cx + dx * factor
-    src_y = cy + dy * factor
+    src_x = (cx + dx * factor).astype(np.float32)
+    src_y = (cy + dy * factor).astype(np.float32)
     return cv2.remap(img_, src_x, src_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
 
@@ -456,8 +456,8 @@ def glass_sphere(img: np.ndarray) -> np.ndarray:
     max_dist = np.sqrt(cx ** 2 + cy ** 2)
     r = dist / max_dist
     factor = np.sin(r * np.pi / 2) ** 0.5
-    src_x = cx + dx * factor
-    src_y = cy + dy * factor
+    src_x = (cx + dx * factor).astype(np.float32)
+    src_y = (cy + dy * factor).astype(np.float32)
     return cv2.remap(img_, src_x, src_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
 
