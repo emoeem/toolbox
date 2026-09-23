@@ -66,6 +66,8 @@ def add_border(path: str, output: str, width: int, color="#ffffff") -> str:
 
 
 def resize_by_weight(path: str, output: str, target_kb: int, quality_min=25) -> str:
+    if int(target_kb) < 1:
+        raise ValueError("target_kb must be at least 1")
     im=Image.open(path).convert("RGB"); lo,hi=quality_min,95; best=None
     while lo<=hi:
         q=(lo+hi)//2; b=io.BytesIO(); im.save(b,"JPEG",quality=q,optimize=True)
@@ -176,6 +178,8 @@ PARITY_FEATURES = {
 
 # ---- ImageToolbox desktop implementations ----
 def resize_with_limits(path, output, max_width=4096, max_height=4096, mode="contain"):
+    if int(max_width) <= 0 or int(max_height) <= 0:
+        raise ValueError("max_width and max_height must be greater than 0")
     im=Image.open(path)
     ratio=min(max_width/im.width, max_height/im.height, 1.0)
     if mode == "stretch": size=(max_width,max_height)
@@ -196,6 +200,9 @@ def create_gradient(output, width=1200, height=800, start="#8b5cf6", end="#22d3e
     Image.fromarray(arr,"RGB").save(output); return output
 
 def generate_noise(output,width=1024,height=1024,amount=1.0,kind="gaussian"):
+    allowed={"gaussian","uniform"}
+    if kind not in allowed:
+        raise ValueError(f"unsupported noise kind: {kind!r}; expected one of {sorted(allowed)}")
     if kind=="uniform": arr=np.random.uniform(0,255,(height,width,3))
     else: arr=np.random.normal(127,70*amount,(height,width,3))
     Image.fromarray(np.clip(arr,0,255).astype(np.uint8)).save(output); return output
@@ -479,7 +486,7 @@ def svg_make(output: str, width=1024, height=1024, background="#ffffff", shapes=
             x=float(s.get("x",0)); y=float(s.get("y",0)); w=float(s.get("w",s.get("width",width-x))); h=float(s.get("h",s.get("height",height-y)))
             if w<=0 or h<=0: raise ValueError("SVG rect width and height must be positive")
             body.append(f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" rx="{float(s.get("rx",0)):g}" fill="{s.get("fill","#000")}"/>')
-        elif s.get("type")=="text": body.append(f'<text x="{s["x"]}" y="{s["y"]}" font-size="{s.get("size",48)}" fill="{s.get("fill","#000")}">{s.get("text","")}</text>')
+        elif s.get("type")=="text": body.append(f'<text x="{s.get("x", 0)}" y="{s.get("y", 0)}" font-size="{s.get("size",48)}" fill="{s.get("fill","#000")}">{s.get("text","")}</text>')
     Path(output).write_text(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">{"".join(body)}</svg>',encoding="utf-8")
     return output
 
@@ -544,11 +551,19 @@ def annotate(path: str, output: str, items=None) -> str:
     im=Image.open(path).convert("RGBA"); d=ImageDraw.Draw(im)
     for it in items or []:
         typ=it.get("type","rect")
-        if typ=="rect": d.rectangle(tuple(it["box"]),outline=it.get("color","#ff4d6d"),width=int(it.get("width",4)))
-        elif typ=="ellipse": d.ellipse(tuple(it["box"]),outline=it.get("color","#ff4d6d"),width=int(it.get("width",4)))
-        elif typ=="line": d.line(tuple(it["xy"]),fill=it.get("color","#ff4d6d"),width=int(it.get("width",4)))
-        elif typ=="text": d.text(tuple(it["xy"]),it.get("text",""),fill=it.get("color","#ffffff"))
+        if typ=="rect": d.rectangle(tuple(it.get("box", (0,0,im.width-1,im.height-1))),outline=it.get("color","#ff4d6d"),width=int(it.get("width",4)))
+        elif typ=="ellipse": d.ellipse(tuple(it.get("box", (0,0,im.width-1,im.height-1))),outline=it.get("color","#ff4d6d"),width=int(it.get("width",4)))
+        elif typ=="line": d.line(tuple(it.get("xy", (0,0,im.width-1,im.height-1))),fill=it.get("color","#ff4d6d"),width=int(it.get("width",4)))
+        elif typ=="text": d.text(tuple(it.get("xy", (0,0,im.width-1,im.height-1))),it.get("text",""),fill=it.get("color","#ffffff"))
     im.save(output); return output
+
+
+def erase_background(path: str, output: str, model="u2net", backend="auto") -> str:
+    from .ai import remove_background
+    from .utils import np_to_pil
+    result = remove_background(np.asarray(Image.open(path).convert("RGBA")), model=model, backend=backend)
+    np_to_pil(result).save(output)
+    return output
 
 
 def run_parity_tool(tool: str, **kwargs):
@@ -566,7 +581,7 @@ def run_parity_tool(tool: str, **kwargs):
         "animation-format":convert_animation_format,"jxl":jxl_convert,"ocr":ocr_to_file,
         "fusion":multi_frame_fusion,"color-sample":color_sample,"color-replace":color_replace,
         "colorize":colorize_gradient,"svg-make":svg_make,"texture":texture_generate,"mesh-gradient":mesh_gradient,
-        "shader":shader_cpu,"audio-cover":extract_audio_cover,"wallpaper":wallpaper_export,"annotate":annotate,
+        "shader":shader_cpu,"audio-cover":extract_audio_cover,"wallpaper":wallpaper_export,"annotate":annotate,"background-remove":erase_background,
     }
     fn=mapping.get(tool)
     if fn is None: raise KeyError(tool)
@@ -702,7 +717,7 @@ def run_parity_tool(tool: str, **kwargs):
         "jxl": jxl_convert, "ocr": ocr_to_file, "fusion": multi_frame_fusion,
         "color-sample": color_sample, "color-replace": color_replace, "colorize": colorize_gradient,
         "svg-make": svg_make, "texture": texture_generate, "mesh-gradient": mesh_gradient,
-        "shader": shader_cpu, "audio-cover": extract_audio_cover, "wallpaper": wallpaper_export, "annotate": annotate,
+        "shader": shader_cpu, "audio-cover": extract_audio_cover, "wallpaper": wallpaper_export, "annotate": annotate, "background-remove": erase_background,
     }
     fn = mapping.get(tool)
     if fn is None:

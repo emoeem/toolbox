@@ -17,6 +17,13 @@ class ParityProcessorTests(unittest.TestCase):
         self.assertEqual(audit["levels"], {"placeholder": 2, "usable": 44, "equivalent": 0, "未验证": 21})
         self.assertEqual({f["level"] for f in audit["features"]}, {"placeholder", "usable", "未验证"})
 
+    def test_annotate_defaults_missing_xy(self):
+        with tempfile.TemporaryDirectory() as td:
+            src=Path(td)/"in.png"; out=Path(td)/"out.png"
+            Image.new("RGB",(32,24),(20,30,40)).save(src)
+            parity.annotate(str(src),str(out),[{"type":"line"},{"type":"text","text":"QA"}])
+            self.assertEqual(Image.open(out).size,(32,24))
+
     def test_svg_maker_defaults_missing_rect_width(self):
         with tempfile.TemporaryDirectory() as td:
             out=Path(td)/"design.svg"
