@@ -16,7 +16,7 @@ class ParityProcessorTests(unittest.TestCase):
         self.assertEqual(len(parity.PARITY_FEATURES), 67)
         audit = parity.parity_audit()
         self.assertEqual(audit["pending"], [])
-        self.assertEqual(audit["levels"], {"placeholder": 2, "usable": 44, "equivalent": 0, "未验证": 21})
+        self.assertEqual(audit["levels"], {"placeholder": 2, "usable": 55, "equivalent": 0, "未验证": 10})
         self.assertEqual({f["level"] for f in audit["features"]}, {"placeholder", "usable", "未验证"})
 
     def test_erase_background_alias_is_mapped(self):

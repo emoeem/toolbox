@@ -288,3 +288,122 @@ offscreen 已实际验证：菜单 `文件/视图/编辑/工具/帮助`；Dock `
 - 后端缺失时的 UI fallback/manual backend 标识尚未完整验证。
 - 设置对话框的真实点击保存/恢复默认以及真实 GUI DPI 绘制仍待真机验证。
 - 本轮没有推进 A2.5，没有新增功能。
+
+## 10. 第二轮真机结果回写
+
+本轮承接消息中的“用户真机验证结果”字段没有实际填写具体结果，因此**没有伪造真机通过项**。真实 X11/Wayland GUI、真实菜单点击、真实 Dock、真实设置对话框点击仍标记为“待用户真机验证”。本轮远程环境仍无 `DISPLAY`/`WAYLAND_DISPLAY`。
+
+## 11. P2/P3 Blocker 修复
+
+### 11.1 night_vision
+
+- 修复文件：`processors/advanced_filters.py:598`
+- 修复前：`cv2.Laplacian(gray, cv2.CV_64F)` 在当前 OpenCV 5 环境报 `Unsupported combination of source format (=5), and destination format (=6)`。
+- 修复后：使用 `cv2.CV_32F`；实际 `32×32 uint8` 输入成功输出 `32×32 uint8`，mean=32。
+- 回归：`tests/test_filters.py::test_night_vision_runs_and_returns_rgb`
+- commit：`469a60b fix: night vision filter`
+
+### 11.2 LogWidget
+
+- 修复文件：`app/workbench.py:91+`
+- 新增：关键字搜索、级别搜索、TXT/JSON 导出、清空、自动滚动。
+- 回归：`tests/test_workbench.py`
+- 实测：INFO/ERROR 过滤、TXT 内容、JSON 数组、清空全部通过。
+- commit：`aa399dc feat: log widget filter and export`
+
+### 11.3 Erase Background / rembg
+
+- 修复文件：`processors/ai.py:28+`
+- 缺少 rembg 时从裸 `ImportError` 改为明确 `RuntimeError("rembg 后端不可用，请安装 rembg[cli] 和 onnxruntime")`。
+- 当前环境：`rembg=True`、`onnxruntime=True`、CUDA provider 包不存在；实际 U²-Net 模型已缓存于 `~/.rembg/models/u2net/u2net.onnx`，约 176 MB。
+- 实际 CPU 路径：128×128 红色圆形输入 → 128×128 RGBA 输出，721 bytes，成功。
+- 回归：`tests/test_ai.py::test_missing_rembg_is_clear_error`
+- commit：`86d5efb fix: erase background rembg pipeline`
+
+### 11.4 Backend fallback status
+
+- `backends/registry.py` 增加每个后端的安装提示。
+- `app/main_window.py` 后端状态页现在显示“后端不可用 + 安装提示”，并提供“刷新后端状态”；GMIC filter cache 刷新保持独立。
+- 模拟所有 `shutil.which` 后端缺失的测试通过。
+- commit：`78be42d feat: expose backend fallback status in UI`
+
+## 12. 破坏性测试矩阵
+
+本轮实际执行了空/非法/极端输入和真实 8000×8000 输入。**没有把“函数没有崩”误写成“输出语义正确”**。
+
+| 模块 | 场景 | 期望 | 实际 | 通过 | 证据 |
+|---|---|---|---|---|---|
+| APNG | 空帧 | 明确拒绝 | `ValueError: 至少需要一个帧` | 是 | `/tmp/destructive2.json` |
+| Archive | 空列表 | 安全处理 | 22-byte 空 ZIP | 是（定义为空归档） | `/tmp/destructive2.json` |
+| ASCII | 非法图像 | 拒绝 | `UnidentifiedImageError` | 是 | `/tmp/destructive2.json` |
+| Audio Cover | 非音频 | 拒绝/无封面 | `ValueError: 音频文件没有找到嵌入封面` | 是 | `/tmp/destructive2.json` |
+| Batch Rename | 空列表 | 安全 no-op | 返回 `[]` | 是 | `/tmp/destructive2.json` |
+| Checksum | 文本文件 | 任意文件可校验 | 返回全部 checksum | 是 | `/tmp/destructive2.json` |
+| Cipher | 文本文件/空密码 | 文件仍可加密 | 输出 100 bytes | 是 | `/tmp/destructive2.json` |
+| Collage | 空列表 | 安全处理 | 生成小图 | **需人工确认语义** | `/tmp/destructive2.json` |
+| Curves | 非法图像 | 拒绝 | `UnidentifiedImageError` | 是 | `/tmp/destructive2.json` |
+| Fractal | 0×0/0 iterations | 拒绝或安全错误 | `ZeroDivisionError` | **否** | `/tmp/destructive2.json` |
+| Limits Resize | 0×0 | 拒绝 | 明确 `ValueError` | 是 | `/tmp/destructive2.json` |
+| Mesh Gradient | 0×0 | 拒绝 | `ValueError: cannot write empty image` | 是 | `/tmp/destructive2.json` |
+| Fusion | 空帧 | 拒绝 | `ValueError: min() iterable argument is empty` | 是 | `/tmp/destructive2.json` |
+| Noise | 非法 kind | 拒绝 | `ValueError: unsupported noise kind` | 是 | `/tmp/destructive2.json` |
+| Palette | 非法图像 | 拒绝 | `UnidentifiedImageError` | 是 | `/tmp/destructive2.json` |
+| Resize/Convert | 非法图像/格式 | 拒绝 | `UnidentifiedImageError` | 是 | `/tmp/destructive2.json` |
+| Texture | 0×0/非法 kind | 拒绝 | `ValueError: cannot write empty image` | 是 | `/tmp/destructive2.json` |
+| WebP | 非法图像/quality=-1 | 拒绝 | `UnidentifiedImageError` | 是 | `/tmp/destructive2.json` |
+| Weight Resize | target_kb=-1 | 拒绝 | `ValueError: target_kb must be at least 1` | 是 | `/tmp/destructive2.json` |
+| Watermark | 非法图像 | 拒绝 | `UnidentifiedImageError` | 是 | `/tmp/destructive2.json` |
+| Crop | width/height=0 | 不应静默扩大范围 | 实际生成约原尺寸图 | **否/待修** | `/tmp/destructive2.json` |
+| Gradient | 非法颜色 | 拒绝 | `ValueError: unknown color specifier` | 是 | `/tmp/destructive2.json` |
+| PDF | 非法图像/count=0 | 拒绝 | `UnidentifiedImageError` | 是 | `/tmp/destructive2.json` |
+| SVG Maker | 0×0 | 应拒绝无效尺寸 | 生成 `viewBox=0 0 0 0` SVG | **否/待修** | `/tmp/destructive2.json` |
+| 8000×8000 Resize | 大图 | 无崩溃并输出 | 4096 限制输出成功 | 是 | `/tmp/destructive2.json` |
+| 8000×8000 WebP | 大图 | 无崩溃并输出 | 成功 | 是 | `/tmp/destructive2.json` |
+| 8000×8000 Crop | 大图 | 无崩溃并输出 | 成功 | 是 | `/tmp/destructive2.json` |
+| Fractal | 4 并发 | 4 独立输出 | 4/4 | 是 | `/tmp/destructive2.json` |
+
+### 取消/关闭窗口边界
+
+任务系统真实执行了“取消前置任务”和 4 并发任务；但当前处理器 API 大多不是可取消协作式 API，因此**处理中取消不能证明真正中断底层处理**。本轮不伪造“中途取消已通过”。真实窗口关闭时的全部处理任务矩阵也没有在无头环境中冒充 GUI 通过。
+
+因此本轮明确保留 P2：
+
+- `fractal-generation` 0×0 仍可能 `ZeroDivisionError`。
+- `crop` 0 尺寸会被当前实现按 falsy 值处理，存在边界语义问题。
+- `svg-maker` 0×0 会生成 0×0 SVG。
+- 处理中真正取消、关闭窗口时处理、快速连续点击的完整 GUI 矩阵仍待真实桌面环境验证。
+
+## 13. 最终等级
+
+本轮真实执行后重新统计：
+
+- **usable：55**
+- **runnable：0**
+- **equivalent：0**
+- **未验证：10**
+- **placeholder：2**
+- **总计：67**
+
+本轮从未验证升级到 usable 的 11 项：`ai-tools`、`document-scanner`、`edit-exif`、`jxl-tools`、`load-net-image`、`palette-pdf`、`pick-color`、`recognize-text`、`scan-qr-code`、`app-logs`、`erase-background`。
+
+`shader-studio` 不升级：虽然 `Color Invert` 有实际 CPU 输出，但 `Grayscale/Tint` 执行器没有实现对应 effect，且真实 OpenGL GUI 未验证。
+
+仍未验证 10 项：`draw`、`markup-layers`、`filters`、`help`、`libraries-info`、`library-details`、`main`、`media-picker`、`root`、`shader-studio`。
+
+## 14. Equivalent 样本结果
+
+判定标准：`docs/parity-equivalent-criteria.md`。
+样本对照：`docs/parity-comparison-texture-shader.md`。
+
+- Texture Studio / Perlin + Pattern：**不 equivalent**。参考实现的纹理类型、Pattern 参数和 GPU 路径覆盖明显更广。
+- Shader Studio / Color Invert + Grayscale + Tint：**不 equivalent**。参考实现是通用 shader preset 编辑器；Toolbox 的 Grayscale/Tint CPU effect 实际没有实现，且参考项目没有证据证明这三个名字是官方内置 preset。
+- `equivalent`：**0 → 0**。
+
+## 15. 本轮新增 P2/P3
+
+- Fractal 0×0 → `ZeroDivisionError`。
+- Crop 0 尺寸 → 静默使用原尺寸语义。
+- SVG Maker 0×0 → 生成无效尺寸 SVG。
+- Shader CPU `grayscale` / `tint` 名义 preset 与执行器不一致。
+- 完整 577 filters 仍未逐项验证；night_vision 已修复。
+- 真正处理中取消/关闭窗口仍未完成真实 GUI 验证。

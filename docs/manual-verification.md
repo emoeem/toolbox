@@ -365,3 +365,31 @@ QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 uv run python -c 'from PySide6.QtWid
 - 日志：当前只有追加/清空，本轮不新增过滤/导出功能。
 - Erase Background：仅修复 mapping 崩溃，真实 rembg 模型闭环仍待验证。
 - 破坏性矩阵（8000×8000、取消、快速点击、关闭窗口）仍需后续专门执行。
+
+## 11. 第二轮验证记录（2026-09-23）
+
+> 本轮承接消息没有填写实际真机验证结果，因此以下 GUI 项不宣称真机通过。
+
+### 已实际验证
+
+- `night_vision`：32×32 实际执行通过。
+- LogWidget：关键字过滤、级别过滤、TXT/JSON 导出、清空、自动滚动测试通过。
+- Erase Background：U²-Net/rembg CPU 实际 128×128 → 128×128 RGBA；模型缓存已存在。
+- 后端状态：缺失后端模拟测试通过；UI 状态页增加安装提示和刷新。
+- 8000×8000：resize、WebP、crop 实际执行。
+- 4 并发 fractal：4/4 独立输出。
+- QR、EXIF、网络图片、设置持久化、OCR、APNG/GIF/WebP/JXL/PDF/Document Scanner 等此前未验证项已经有真实执行证据。
+
+### 未宣称通过
+
+- 真实 X11/Wayland GUI：**待用户真机验证**。
+- 处理中途取消、关闭窗口、快速连续点击的完整 GUI 矩阵。
+- Filters 全量 577 项；当前抽样 30 项中 29 项通过，`night_vision` 已修复。
+- Shader Studio OpenGL GUI 闭环。
+
+### 需要关注的边界失败
+
+- Fractal 0×0：`ZeroDivisionError`。
+- Crop 0×0：当前实现存在 falsy 参数导致的范围语义问题。
+- SVG Maker 0×0：生成 `viewBox=0 0 0 0`。
+- Shader CPU 的 Grayscale/Tint 名义 preset 没有对应执行分支。
