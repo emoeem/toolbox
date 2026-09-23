@@ -7,6 +7,44 @@ import numpy as np
 from skimage import color as sk_color
 
 from .utils import clamp, ensure_rgb, ensure_rgba, u8
+from PIL import Image, ImageDraw, ImageFont
+from pathlib import Path
+
+
+def _watermark_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = [
+        Path.home() / ".local/share/fonts/MiSans-Regular.ttf",
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+    for path in candidates:
+        if path.exists():
+            try: return ImageFont.truetype(str(path), max(1, int(size)))
+            except OSError: pass
+    return ImageFont.load_default()
+
+
+def add_text_watermark(img: np.ndarray, text: str, x: float = 0.5, y: float = 0.5,
+                       font_scale: float = 0.15, color=(255, 255, 255),
+                       opacity: float = 0.5) -> np.ndarray:
+    arr = ensure_rgba(img).copy()
+    if not text:
+        return arr
+    h, w = arr.shape[:2]
+    size = max(8, int(min(w, h) * float(font_scale)))
+    base = Image.fromarray(arr, mode="RGBA")
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    font = _watermark_font(size)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    px = int(float(x) * w - tw / 2)
+    py = int(float(y) * h - th / 2)
+    alpha = max(0, min(255, int(float(opacity) * 255)))
+    draw.text((px, py), text, font=font, fill=tuple(color) + (alpha,))
+    base.alpha_composite(overlay)
+    return np.asarray(base, dtype=np.uint8)
 
 
 def _gray_weighted(img: np.ndarray) -> np.ndarray:

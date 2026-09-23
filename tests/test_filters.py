@@ -1,6 +1,20 @@
 
 import numpy as np
-from processors.filters import apply_filter
+from processors.filters import apply_filter, add_text_watermark
+
+def test_text_watermark_numeric_and_chinese_behavior():
+    img = np.zeros((120, 160, 4), dtype=np.uint8)
+    img[..., 3] = 255
+    base = add_text_watermark(img, "测试水印", 0.5, 0.5, 0.15, (255, 0, 0), 1.0)
+    assert base.shape == img.shape
+    assert not np.array_equal(base, img)
+    faint = add_text_watermark(img, "测试水印", 0.5, 0.5, 0.15, (255, 0, 0), 0.25)
+    large = add_text_watermark(img, "测试水印", 0.5, 0.5, 0.25, (255, 0, 0), 1.0)
+    blue = add_text_watermark(img, "测试水印", 0.5, 0.5, 0.15, (0, 0, 255), 1.0)
+    assert not np.array_equal(base, faint)
+    assert not np.array_equal(base, large)
+    assert not np.array_equal(base, blue)
+
 
 def test_crt_curvature_uses_supported_border_mode():
     img = np.arange(32 * 32 * 3, dtype=np.uint8).reshape(32, 32, 3)
