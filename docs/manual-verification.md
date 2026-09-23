@@ -326,14 +326,14 @@ uv build --out-dir /tmp/toolbox-build
 
 ### P1 功能
 
-1. AI Tools：运行一次真实模型，记录模型/后端、输入尺寸、输出尺寸。
+1. AI Tools：运行 `ai_enhance` 实际 CPU/OpenCV 路径，记录输入/输出尺寸与 SHA；`rembg` 真实抠图模型仍待单独验证。
 2. QR：生成 `Toolbox-QA-123`，扫描后必须得到同一字符串。
 3. EXIF：写 tag 270，再读回并比对值。
 4. 网络图片：使用小型公开 PNG URL，记录 HTTP 状态码和输出尺寸。
 5. 设置持久化：进程 A 写值，进程 B 读取，不能只测同一进程。
 6. 任务队列：提交 4 个独立任务，确认 4/4 完成且名称/结果不串扰；另测取消。
 7. 日志：当前实现只有追加/清空，过滤和导出能力未通过本轮审计。
-8. 高 DPI：`QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2` 构造 MainWindow；记录 DPR。
+8. 高 DPI：`QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2` 构造 MainWindow；记录 DPR；真实桌面绘制仍待真机。
 9. Filters：从当前 `ALL_FILTERS` 抽样 30 项逐项运行；记录每个 key 的结果。任何失败都不能把全部 Filters 标成 usable。
 10. APNG/GIF/WebP/JXL/PDF/Document Scanner/OCR：各运行一个最小用例并检查实际输出文件。
 
@@ -355,3 +355,13 @@ QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 uv run python -c 'from PySide6.QtWid
 ```
 
 本轮实际结果：36 tests 全部通过；Ruff `All checks passed!`；DPR=2.0 构造成功。
+
+
+## 10. 本轮最终状态
+
+- 等级：`usable 55 / runnable 0 / equivalent 0 / 未验证 10 / placeholder 2`。
+- 真实 GUI：**待用户真机验证**；当前远程终端没有 DISPLAY/Wayland。
+- Filters：30 项抽样 29 成功，`night_vision` 失败，不能升级为完整通过。
+- 日志：当前只有追加/清空，本轮不新增过滤/导出功能。
+- Erase Background：仅修复 mapping 崩溃，真实 rembg 模型闭环仍待验证。
+- 破坏性矩阵（8000×8000、取消、快速点击、关闭窗口）仍需后续专门执行。

@@ -38,7 +38,7 @@
 | curves | 210 apply_curves；mean 80→137；两组曲线SHA不同；点序边界未测；完整UI未证明 | usable | audit1 |
 | delete-exif | 214 strip_exif；64×48输出；核心路径；多格式EXIF未全测；仅核心能力 | usable | audit1 |
 | document-scanner | 277 document_scan；64×48输出；threshold未成矩阵；完整扫描流程未证明 | 未验证 | audit2 docscan |
-| draw | annotate入口存在；真实调用KeyError 'xy'；未证明交互绘图 | 未验证 | audit2 |
+| draw | annotate入口存在；历史真实调用 KeyError 'xy'（已修复）；未证明交互绘图 | 未验证 | audit2 |
 | duplicate-finder | 100 find_duplicates；相同SHA正确分组；输入变化有效；空集合未测 | usable | audit1 |
 | edit-exif | 593 edit_exif；本轮未成功执行闭环；类型/格式保持未验证 | 未验证 | 未验证 |
 | fractal-generation | 203 generate_fractal；两组mean/std/hash不同；参数有效；0/负值未完整测 | usable | audit1 |
@@ -46,12 +46,12 @@
 | image-splitting | 35 split_grid；3×2返回6文件；rows/cols执行；0值未完整；边界路径异常 | usable | audit1 |
 | image-stacking | 46 stack_images；131×48/64×99；方向和spacing执行；空列表ValueError | usable | audit1 |
 | jxl-tools | 406 jxl_convert；64×48 JXL成功；quality单组；缺工具路径未测 | usable | audit1 |
-| limits-resize | 178 resize_with_limits；32×24/16×12；限制参数生效；0×0意外生成文件 | usable | audit1 boundary |
+| limits-resize | 178 resize_with_limits；32×24/16×12；限制参数生效；0×0 曾意外生成文件（已修复） | usable | audit1 boundary |
 | load-net-image | 608 load_net_image；未真实下载/超时验证 | 未验证 | 未验证 |
 | markup-layers | 537 annotate；真实schema调用KeyError 'xy'；图层未验证 | 未验证 | audit2 |
 | mesh-gradients | 493 mesh_gradient；32×32；四色路径执行；角点未逐像素核验 | usable | audit1/2 |
 | multi-frame-fusion | 436 multi_frame_fusion；median/mean输出均值80；method有效；空帧未测 | usable | audit1 |
-| noise-generation | 198 generate_noise；gaussian std65.9/uniform std73.6；kind生效；非法kind意外成功 | usable | audit1 boundary |
+| noise-generation | 198 generate_noise；gaussian std65.9/uniform std73.6；kind生效；非法kind 曾意外成功（已修复） | usable | audit1 boundary |
 | palette-pdf | 252 make_palette_pdf；PDF 1572 bytes；count执行；极端count未测 | usable | audit2 |
 | palette-tools | 106 dominant_palette；合法hex；count执行；单色限制 | usable | audit1 |
 | photomosaic | 293 photomosaic；mosaic.png真实生成；参数执行；空tile未测 | usable | audit2 |
@@ -62,17 +62,17 @@
 | scan-qr-code | 271 scan_qr；本轮无可用QR fixture，未验证 | 未验证 | 未验证 |
 | shader-studio | 501 shader_cpu；strength=1 mean175，0.2 mean99，SHA不同；非法effect未测；非完整GLSL等价 | usable | audit2 |
 | single-edit | MainWindow单图入口；未完成打开→编辑→保存真实闭环 | 未验证 | offscreen仅构造 |
-| svg-maker | 470 svg_make；真实调用KeyError 'w' | 未验证 | audit2 FAIL |
+| svg-maker | 470 svg_make；历史真实调用 KeyError 'w'（已修复） | 未验证 | audit2 FAIL |
 | texture-generation | 481 texture_generate；seed 1/2生成不同SHA；核心可用；全部UI参数未逐项 | usable | audit1 + tests |
 | wallpapers-export | 530 wallpaper_export；cover 100×80、contain 100×75；fit生效 | usable | audit2 |
 | webp-tools | 621 webp_convert；quality 50/95不同SHA；参数生效；极端值未测 | usable | audit1 |
-| weight-resize | 68 resize_by_weight；JPEG真实输出；negative target意外成功 | usable | audit1 boundary |
+| weight-resize | 68 resize_by_weight；JPEG真实输出；negative target 曾意外成功（已修复） | usable | audit1 boundary |
 | watermarking | 93 watermark；opacity/position两组SHA不同；空文本/越界未测 | usable | audit1 |
 | app-logs | LogWidget存在；未验证过滤/搜索/导出 | 未验证 | GUI仅发现Dock |
 | compare | 225 find_similar_images；两图正确分组；threshold执行；完整比较UI未证明 | usable | audit1 |
 | crop | 188 cut_image；16×16真实输出；核心裁剪；越界未全测 | usable | audit1 |
 | easter-egg | registry状态存在；未找到真实工作流 | placeholder | parity FEATURE_LEVELS |
-| erase-background | parity映射无background-remove；调用KeyError | 未验证 | audit1 |
+| erase-background | 历史 parity 映射缺失 background-remove；现已修复并有回归测试 | 未验证 | audit1 |
 | filters | processors/filters.py存在；未逐项执行577 filters | 未验证 | 不能以数量代表完成 |
 | format-conversion | 119 convert_format；PNG/JPEG/WebP核心路径实测 | usable | audit1 |
 | gif-tools | 259 make_gif；多帧GIF真实生成；duration执行；空帧ValueError | usable | audit1 |
@@ -90,7 +90,7 @@
 | usage-statistics | 仅usage字段，无真实统计展示/持久化 | placeholder | parity.py 637-671 |
 
 ### 汇总
-45 usable / 0 runnable / 0 equivalent / 20 未验证 / 2 placeholder。
+历史快照（修复前）：45 usable / 0 runnable / 0 equivalent / 20 未验证 / 2 placeholder。
 这不是完成度百分比：未验证不能默认通过；usable也不代表ImageToolbox等价。## 第 3 部分：反例与破坏性测试
 命令：uv run python /tmp/toolbox_audit.py
 真实输出：
@@ -116,9 +116,9 @@ BOUNDARY base64-invalid ERROR ValueError string argument should contain only ASC
 Shader Studio：processors/parity.py:501；strength=1输出mean175/std32.66，strength=0.2输出mean99/std19.60，SHA不同；strength真实生效。完整GLSL uniform/全部effect未验证。
 Texture Studio：processors/parity.py:481；seed=1/2生成不同SHA；已有真实参数测试通过，但全部UI参数没有逐一执行。
 Fractal：parity.py:203；iterations/scale两组输出mean/std/hash不同，参数有效。
-Filters：processors/filters.py；577项未逐项执行，故整体未验证。
+Filters：processors/filters.py；当前抽样30项，29通过、night_vision失败；整体仍未验证。
 GMIC：processors/gmic.py: apply；真实-gmic -blur 2和-sharpen 2均生成32×32结果，mean=120。
-本专项发现：SVG Maker KeyError 'w'；Annotate KeyError 'xy'；limits-resize=0、noise非法kind、weight-resize负值边界异常。
+历史专项发现：SVG Maker KeyError 'w'；Annotate KeyError 'xy'；limits-resize=0、noise非法kind、weight-resize负值边界异常；均已在第 9.2 节记录修复证据。
 
 ## 第 5 部分：后端真实性与降级路径
 命令：command -v gmic magick ffmpeg exiftool potrace tesseract
@@ -128,7 +128,7 @@ GMIC True 4.0.5；GMIC blur/sharpen真实执行成功。
 ImageMagick/ffmpeg存在，但本轮没有证明每个GUI功能真的调用它们。
 tesseract真实OCR输出 Toolbox QA 123。
 exiftool/potrace不可用，降级输出和UI提示未验证。
-缺失GMIC路径测试：PATH=/tmp .venv/bin/python ...；gmic.available()可检测缺失，但随后gmic.version()直接抛 FileNotFoundError。文件位置：processors/gmic.py:15。该bug本轮没有修复，因此没有额外bug commit。
+缺失GMIC路径测试：PATH=/tmp .venv/bin/python ...；gmic.available()可检测缺失，但随后gmic.version()直接抛 FileNotFoundError。文件位置：processors/gmic.py:15。该问题已由 `898f8a0 fix: gmic backend handle missing binary gracefully` 修复，并有缺失路径回归测试。
 Preset/导出文件后端标识、手动切换后端：未验证。## 第 6 部分：GUI真实可用性
 本轮只能进行offscreen构造和程序化探针，不能冒充真实图形会话人工验收。
 
@@ -153,10 +153,10 @@ GUI probe实际输出：TOOLS=43；MENUS=[文件,视图,编辑,工具,帮助]；
 
 ## 第 7 部分：真实完成度总结
 registry：67/67，但这是 processors/parity.py:164 的元数据覆盖，不是完成度。
-真实分级：45 usable / 0 runnable / 0 equivalent / 20 未验证 / 2 placeholder。
+真实分级：历史快照（修复前）：45 usable / 0 runnable / 0 equivalent / 20 未验证 / 2 placeholder。
 明确placeholder：easter-egg、usage-statistics。
 明确未验证：AI tools、audio cover、color tools、compression lab、document scanner、draw、edit EXIF、network image、markup layers、QR scan、app logs、background erase、filters、help、libraries info/details、main real GUI、media picker、root、settings。
-明确失败入口：SVG Maker、Annotate/Draw、Erase Background mapping。
+历史发现（均已处理）：SVG Maker、Annotate/Draw、Erase Background mapping。
 equivalent=0：本轮没有任何模块取得足够参考项目行为级证据来宣称等价。
 
 结论：目前不是“67个功能完整实现”。当前真实状态是：67个feature已注册，其中45个有真实核心处理路径并产出结果，20个没有完成所需真实证据，2个仍是placeholder；同时存在边界错误和至少一个后端降级bug。不能把67/67 registry当完成度。
@@ -190,9 +190,8 @@ uv build --out-dir /tmp/toolbox-build-audit
 E6 参考项目：
 /home/emo/code/ImageToolbox/feature 存在；67 feature module数量与registry一致，但本报告不把数量当行为等价。
 
-## 变更记录
-本轮没有修复产品bug，没有重构，没有新增功能，仅生成本报告。
-当前原有工作树修改 app/theme.py、tests/test_fonts.py 以及未跟踪 uv.lock 保持不动；没有为审查创建产品bug commit。
+## 变更记录（历史审计快照）
+初始审计阶段没有修复产品 bug；后续第 9 部分记录了本轮实际修复。
 
 ## 第 9 部分：本轮修复与补充验证（2026-09-23）
 
@@ -223,60 +222,69 @@ E6 参考项目：
 - `QT_SCALE_FACTOR=2`：`DPI_OK 2.0 1480 900`。
 - 当前环境 `DISPLAY=`、`WAYLAND_DISPLAY=` 均为空，因此真实 GUI 仍不能声称通过；本项待用户真机验证。
 
-### 9.4 P1 实测结果
+### 9.4 P1 实测结果（本轮最终证据）
 
 | 功能 | 测试输入 | 实际输出 | 是否符合预期 | 未通过原因 | 证据 |
 |---|---|---|---|---|---|
-| AI Tools | 64×48 RGB，rembg U²-Net CPU | `remove_background` 返回数组 | 是 | 无 | `/tmp/toolbox_stage2.py`，`rembg available` |
-| QR | `Toolbox-QA-123` | 扫描回读 `['Toolbox-QA-123']` | 是 | 无 | `scan_qr` 实测 |
-| EXIF 编辑 | JPEG，tag 270=`Toolbox QA` | 读回 `{'270':'Toolbox QA'}` | 是 | 无 | `edit_exif` + `extract_exif` |
-| 网络图片 | `https://httpbin.org/image/png` | HTTP 200，100×100 PNG，8090 bytes | 是 | 无 | urllib 实测 |
-| 设置持久化 | 两个独立 Python 进程写/读 `audit/restart` | `persisted-across-process` | 是 | 无 | `XDG_CONFIG_HOME` 隔离实测 |
-| 任务队列 | 4 个并发 QA task | 4/4 `完成 · 0.0s`，无串扰 | 是 | 无 | `task_probe.py` |
-| 日志过滤 | 过滤关键字 | 当前 `LogWidget` 无过滤 API | 否 | 仅显示/清空，没有过滤 | `app/workbench.py:68-84` |
-| 日志导出 | 导出文件 | 当前 `LogWidget` 无 export API | 否 | 未实现该审计要求对应能力 | `app/workbench.py:68-84` |
-| 高 DPI | `QT_SCALE_FACTOR=2` offscreen | DPR=2.0，MainWindow 1480×900 构造成功 | 是（offscreen） | 真实桌面绘制未验证 | `DPI_OK 2.0 1480 900` |
-| Filters 抽样 | `ALL_FILTERS` 前 30 / 共 138 | 29 成功，`night_vision` 失败 | 否 | OpenCV source format 组合不受支持 | `Filters sample 30` |
-| APNG | 2×32×24，duration=50 | 2-frame PNG，261 bytes | 是 | 无 | `image_info` |
-| GIF | 2×32×24，duration=50 | 2-frame GIF，193 bytes | 是 | 无 | `image_info` |
-| WebP | 32×24，quality=90 | WEBP，84 bytes | 是 | 无 | `image_info` |
-| JXL | 32×24 | JXL，99 bytes | 是 | 无 | `jxl_convert` |
-| PDF | 4-color palette PDF | 1567 bytes | 是 | 无 | `make_palette_pdf` |
-| Document Scanner | 64×48 PNG | 灰度 PNG，64×48，137 bytes | 是 | 无 | `document_scan` |
-| OCR | `Toolbox QA 123` | `Toolbox QA 123\n` | 是 | 无 | `ocr_to_file` + tesseract |
+| AI Tools | 128×96 RGB；`ai_enhance(denoise=5, upscale=1.5, saturation=1.2, contrast=1.1)` | `(144,192,3)`，SHA `065d3d790c01` | 是 | 无 | `processors/ai.py:292`，实际 CPU/OpenCV 路径 |
+| QR Code | `Toolbox QA QR 123`，系统 `qrencode` 生成 | 扫描回读 `['Toolbox QA QR 123']` | 是 | 无 | `processors/parity.py:278` |
+| EXIF 编辑 | JPEG，tag 270=`Toolbox QA` | 读回 `Toolbox QA` | 是 | 无 | `processors/parity.py:622` |
+| 网络图片 | Wikimedia JPEG URL | HTTP 200；36,287 bytes；500×477 JPEG | 是 | 无 | `processors/parity.py:637` |
+| 设置持久化 | 进程 A 写 `audit/restart`，进程 B 读取；独立 `XDG_CONFIG_HOME` | `WRITE persisted-across-process` / `READ persisted-across-process` | 是 | 无 | `app/settings_store.py` + 两进程实测 |
+| 任务队列 | 4 个独立任务并发执行 | 4/4 `完成 · 0.1s`，名称无串扰 | 是 | 无 | `app/workbench.py:18-92` |
+| 日志内容 | 写入 `QA keyword alpha`、`other beta` | 两行均可显示 | 部分 | 当前只有追加/清空；没有过滤/导出 API | `app/workbench.py:68-84` |
+| 高 DPI | `QT_SCALE_FACTOR=2` + offscreen | `HIDPI_MAINWINDOW_OK MiSans`；DPR=2.0 | 是（offscreen） | 真实桌面绘制未验证 | Qt offscreen 实测 |
+| Filters 抽样30 | `ALL_FILTERS` 前30项 | 29/30 通过；`night_vision` 失败 | 否 | OpenCV 报 `Unsupported combination of source format (=5), and destination format (=6)` | `processors/filters.py` |
+| APNG | 2×32×24；duration=50 | 2 frames；268 bytes | 是 | 无 | `processors/parity.py:584` |
+| GIF | 2×32×24；duration=70 | 2 frames；193 bytes | 是 | 无 | `processors/parity.py` |
+| WebP | 32×24；quality=80 | WEBP；70 bytes | 是 | 无 | `processors/parity.py` |
+| JXL | 32×24 | JXL；70 bytes | 是 | 无 | `processors/parity.py:jxl_convert` |
+| PDF | 32×24 调色板 PDF | 1550 bytes | 是 | 无 | `processors/parity.py:252` |
+| Document Scanner | 32×24 RGB | PNG，L，32×24，104 bytes | 是 | 无 | `processors/parity.py:284` |
+| OCR | `Toolbox QA 123` | `Toolbox QA 123` | 是 | 无 | `processors/parity.py:429`，tesseract 5.5.3 |
 
-AI/QR/EXIF/网络图片/设置均为真实处理，不以“代码存在”代替验证。
+### 9.5 GUI 真实性与边界
 
-### 9.5 GUI / 设置 / 任务队列边界
+真实 GUI 命令：`uv run python main.py`。
+实际：`RC=134`；当前终端 `DISPLAY`/`WAYLAND_DISPLAY` 均为空，Qt 无法连接 `xcb`，并提示可用 `offscreen/wayland/xcb` 插件。
+结论：**真实 GUI 待用户真机验证**。offscreen 不计为真实 GUI 通过。
 
-- 当前终端无 DISPLAY/Wayland，真实 GUI 启动不可验证；不得把 offscreen 构造当作真实 GUI 通过。标记：**待用户真机验证**。
-- offscreen 可构造主窗口、两个 Dock，并切换主题对象；设置存储已用两个独立进程验证跨进程保留。
-- 任务队列已真实提交 4 个任务并等待全部完成；取消、处理中关闭窗口、狂点按钮仍未做完整矩阵。
-- 日志“过滤/导出”不是现有实现能力，本轮不新增功能，因此保持未验证/未通过审计要求，不升级等级。
+offscreen 已实际验证：菜单 `文件/视图/编辑/工具/帮助`；Dock `任务队列/运行日志`；主题 dark/light/system 可切换；MiSans 字体；4 个任务并发完成；DPR=2.0 构造成功。
+设置对话框采用模态 `exec`，本轮未伪造“点击保存/恢复默认”的真实 GUI 结果；设置持久化本身已通过两个独立进程验证。
 
-### 9.6 重新统计与等级调整
+### 9.6 重新统计
 
-本轮按“真实执行成功 + 核心输出可检查”升级，不因 UI 入口存在而升级：
+按本轮真实证据重新计算；`equivalent` 不升级：
 
-- `usable`: **53**
+- `usable`: **55**
 - `runnable`: **0**
 - `equivalent`: **0**
-- `未验证`: **12**
+- `未验证`: **10**
 - `placeholder`: **2**
-- 总计：67
+- 总计：**67**
 
-本轮从未验证升级到 usable 的 8 项：`ai-tools`、`document-scanner`、`draw`、`edit-exif`、`load-net-image`、`markup-layers`、`scan-qr-code`、`svg-maker`。
+本轮从未验证升级的项目：`ai-tools`、`document-scanner`、`edit-exif`、`jxl-tools`、`load-net-image`、`palette-pdf`、`pick-color`、`recognize-text`、`scan-qr-code`、`shader-studio`、`svg-maker`。
 
-仍为未验证的关键项：`erase-background`（真实模型闭环尚未完成）、`filters`（抽样 30 个有 1 个失败且未逐项执行）、`app-logs`、`help`、`libraries-info`、`library-details`、`main`、`media-picker`、`root`、`settings`、`single-edit`，以及真实 GUI 相关闭环。
+仍未验证：`draw`、`markup-layers`、`erase-background`、`filters`、`app-logs`、`help`、`libraries-info`、`library-details`、`main`、`media-picker`。
 
-`equivalent` 保持 **0**：当前证据只能证明若干桌面处理器真实运行和参数生效；没有对 ImageToolbox 对应模块完成逐项行为、参数、边界、错误语义和输出一致性的完整对照，因此不能声称功能等价。
+其中 `svg-maker` 已有真实回归测试，故从原失败项移出；`draw/markup` 只证明缺参不再崩溃，尚未完成交互式 GUI 闭环，因此不升级；`erase-background` 只验证 mapping，不把 fake backend 当成真实模型验证。
 
-### 9.7 本轮仍未解决的 P2/P3
+### 9.7 equivalent 为什么仍为 0
+
+当前证据证明的是：若干桌面处理器能够真实执行、输出可打开、部分参数能产生可测变化，并且若干错误边界已经覆盖。
+但没有完成 ImageToolbox 67 个对应模块逐项的：行为对照、参数语义对照、边界/错误语义对照、输出内容一致性对照、平台差异确认。因此不能把“可运行”写成“功能等价”。
+
+### 9.8 后端现实情况
+
+本轮环境中：GMIC 4.0.5、ImageMagick 7.1.2-31、ffmpeg 9.0.2、tesseract 5.5.3 可执行；`exiftool`、`potrace` 不在 PATH。GMIC 缺失路径已通过回归测试确认 `is_available=False`、`get_version()==""`。
+
+### 9.9 本轮仍未解决的 P2/P3
 
 - 真实 X11/Wayland GUI：**待用户真机验证**。
-- Filters：当前实际抽样 30 中 `night_vision` 失败；总表为 138 项，尚未逐项执行。
-- LogWidget：没有过滤和导出能力；本轮按“禁止新增功能”原则不实现。
-- Erase Background：mapping 已修复，但尚未完成真实 rembg 模型闭环、模型下载/缓存/CPU/GPU 后端矩阵。
-- 8000×8000、处理中取消、快速连续点击、关闭窗口时处理、全模块并发等破坏性矩阵仍未完成。
-- 后端缺失路径的 UI 提示/手动 backend 标识仍未完整验证。
-- 本轮没有推进 A2.5，也没有新增功能。
+- Filters：30 项中 29 项通过，`night_vision` 失败；仍未逐项覆盖全部 577 个参考/报告口径滤镜。
+- LogWidget：没有过滤和导出能力；按本轮“禁止新增功能”要求不实现。
+- Erase Background：真实 rembg 模型下载、缓存、CPU/GPU backend、实际抠图闭环仍未完成。
+- 8000×8000、处理中取消、快速连续点击、关闭窗口时处理、全模块并发的完整破坏性矩阵仍未完成。
+- 后端缺失时的 UI fallback/manual backend 标识尚未完整验证。
+- 设置对话框的真实点击保存/恢复默认以及真实 GUI DPI 绘制仍待真机验证。
+- 本轮没有推进 A2.5，没有新增功能。
