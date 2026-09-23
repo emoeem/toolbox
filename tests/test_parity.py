@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+
+import numpy as np
 from pathlib import Path
 
 from PIL import Image
@@ -16,6 +18,19 @@ class ParityProcessorTests(unittest.TestCase):
         self.assertEqual(audit["pending"], [])
         self.assertEqual(audit["levels"], {"placeholder": 2, "usable": 44, "equivalent": 0, "未验证": 21})
         self.assertEqual({f["level"] for f in audit["features"]}, {"placeholder", "usable", "未验证"})
+
+    def test_erase_background_alias_is_mapped(self):
+        self.assertIsNotNone(parity.run_parity_tool)
+        self.assertIn("erase-background", parity.PARITY_FEATURES)
+        with tempfile.TemporaryDirectory() as td:
+            src=Path(td)/"in.png"; out=Path(td)/"out.png"
+            Image.new("RGB",(8,8),(255,0,0)).save(src)
+            import processors.ai as ai_mod
+            old=ai_mod.remove_background
+            ai_mod.remove_background=lambda image, **kwargs: np.dstack([image[..., :3], np.full(image.shape[:2],255,dtype=np.uint8)])
+            try: parity.run_parity_tool("erase-background",path=str(src),output=str(out))
+            finally: ai_mod.remove_background=old
+            self.assertGreater(out.stat().st_size,0)
 
     def test_annotate_defaults_missing_xy(self):
         with tempfile.TemporaryDirectory() as td:

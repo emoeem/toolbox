@@ -725,7 +725,7 @@ def run_parity_tool(tool: str, **kwargs):
         "jxl": jxl_convert, "ocr": ocr_to_file, "fusion": multi_frame_fusion,
         "color-sample": color_sample, "color-replace": color_replace, "colorize": colorize_gradient,
         "svg-make": svg_make, "texture": texture_generate, "mesh-gradient": mesh_gradient,
-        "shader": shader_cpu, "audio-cover": extract_audio_cover, "wallpaper": wallpaper_export, "annotate": annotate, "background-remove": erase_background, "background-remove": erase_background,
+        "shader": shader_cpu, "audio-cover": extract_audio_cover, "wallpaper": wallpaper_export, "annotate": annotate, "background-remove": erase_background, "erase-background": erase_background, "background-remove": erase_background, "erase-background": erase_background,
     }
     fn = mapping.get(tool)
     if fn is None:
