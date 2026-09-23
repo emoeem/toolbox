@@ -488,6 +488,9 @@ def colorize_gradient(path: str, output: str, start="#6d5dfc", end="#ff5ca8") ->
 
 
 def svg_make(output: str, width=1024, height=1024, background="#ffffff", shapes=None) -> str:
+    width, height = int(width), int(height)
+    if width < 1 or height < 1:
+        raise ValueError("SVG width and height must be at least 1")
     shapes=shapes or []
     body=[f'<rect width="100%" height="100%" fill="{background}"/>']
     for s in shapes:

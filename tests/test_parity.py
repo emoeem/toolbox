@@ -126,6 +126,12 @@ class ParityProcessorTests(unittest.TestCase):
             with self.assertRaises(ValueError): parity.cut_image(str(src),str(out),width=0)
             with self.assertRaises(ValueError): parity.cut_image(str(src),str(out),height=0)
 
+    def test_svg_maker_rejects_zero_dimensions(self):
+        with tempfile.TemporaryDirectory() as td:
+            out=Path(td)/"out.svg"
+            with self.assertRaises(ValueError): parity.svg_make(str(out),0,16)
+            with self.assertRaises(ValueError): parity.svg_make(str(out),16,0)
+
     def test_limits_resize_rejects_zero_dimensions(self):
         with tempfile.TemporaryDirectory() as td:
             src=Path(td)/"in.png"; out=Path(td)/"out.png"
