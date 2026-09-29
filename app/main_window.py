@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import Qt, QSize, QMimeData
+from PySide6.QtCore import Qt, QSize, QMimeData, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QPainter, QColor, QPixmap, QImage, QPalette, QFontDatabase
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QListWidget, QListWidgetItem, QSplitter, QToolBar,
@@ -19,6 +19,20 @@ from PySide6.QtWidgets import (
 from processors.utils import load_image, save_image, u8, clamp
 from processors import core as img_core
 from processors.filters import ALL_FILTERS, apply_filter
+from processors.filter_defs import FilterDefRegistry
+from processors.filter_chain import FilterChain, FilterStep, FilterStepError
+from processors.filter_presets import save_preset, load_preset, list_presets, delete_preset, preset_exists
+from processors.filter_chain_task import (
+    make_filter_chain_worker,
+    run_filter_chain_sync,
+    preview_cache_key,
+    preview_cache_get,
+    preview_cache_set,
+    preview_cache_clear,
+)
+from processors.batch_filter_chain import run_batch_filter_chain, BatchFilterChainResult
+from processors.cancellation import CancelToken, CancelledError
+from .widgets.filter_parameter_widget import FilterParameterWidget
 from processors import gmic, media, pdf_tools, parity
 from .preview_widget import ImagePreview
 from .theme import LIGHT_QSS, DARK_QSS
@@ -99,6 +113,14 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._restore_window_state()
         self._select_tool(0)
+        self._preview_task = None
+        self._preview_worker_cancel = None
+        self._pending_preview_params = None
+        self._pending_preview_key = None
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(250)
+        self._preview_timer.timeout.connect(self._do_single_filter_preview)
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -238,6 +260,13 @@ class MainWindow(QMainWindow):
         self._settings.setValue("theme/mode", self._theme_mode)
 
     def closeEvent(self, event) -> None:
+        if self._preview_task is not None:
+            try:
+                self._preview_task.cancel()
+            except Exception:
+                pass
+            self._preview_task = None
+        preview_cache_clear()
         self._save_window_state()
         super().closeEvent(event)
 
@@ -444,16 +473,16 @@ class MainWindow(QMainWindow):
             self._build_archive_panel,
             self._build_advanced_panel,
             self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
-            self._build_parity_panel,
+            self._build_crypto_panel,
+            self._build_split_stack_panel,
+            self._build_palette_panel,
+            self._build_draw_panel,
+            self._build_compress_panel,
+            self._build_find_panel,
+            self._build_vector_panel,
+            self._build_resize_ex_panel,
+            self._build_collage_ex_panel,
+            self._build_crypto2_panel,
             self._build_about_panel,
         ]
         if 0 <= tool_index < len(builders):
@@ -598,7 +627,7 @@ class MainWindow(QMainWindow):
         self.right_layout.addLayout(search_row)
 
         self.filter_list = QListWidget()
-        self.filter_list.setFixedHeight(380)
+        self.filter_list.setFixedHeight(300)
         self.filter_list.setSelectionMode(QListWidget.SingleSelection)
         self.filter_list.itemDoubleClicked.connect(self._on_filter_apply)
         for key, (zh_name, _) in ALL_FILTERS.items():
@@ -606,6 +635,13 @@ class MainWindow(QMainWindow):
             item.setData(Qt.UserRole, key)
             self.filter_list.addItem(item)
         self.right_layout.addWidget(self.filter_list)
+
+        self._add_section("⚙️ 参数")
+        self.filter_param_widget = FilterParameterWidget()
+        self.right_layout.addWidget(self.filter_param_widget)
+
+        self.filter_list.itemSelectionChanged.connect(self._on_filter_selected)
+        self.filter_param_widget.paramsChanged.connect(self._on_filter_params_changed)
 
         def filter_items(text: str):
             self.filter_list.clear()
@@ -623,13 +659,319 @@ class MainWindow(QMainWindow):
         btn_apply.clicked.connect(self._on_filter_apply_selected)
         btn_row.addWidget(btn_apply)
 
+        btn_reset_params = QPushButton("↺ 默认")
+        btn_reset_params.setObjectName("secondary")
+        btn_reset_params.clicked.connect(self.filter_param_widget.reset_to_defaults)
+        btn_row.addWidget(btn_reset_params)
+
         btn_reset = QPushButton("↩ 撤销")
         btn_reset.setObjectName("secondary")
         btn_reset.clicked.connect(self.preview.reset_to_original)
         btn_row.addWidget(btn_reset)
         self.right_layout.addLayout(btn_row)
 
+        self._add_section("🔗 滤镜链")
+        self._filter_chain = FilterChain()
+        self._chain_list = QListWidget()
+        self._chain_list.setFixedHeight(120)
+        self._chain_list.itemSelectionChanged.connect(self._on_chain_step_selected)
+        self.right_layout.addWidget(self._chain_list)
+
+        chain_btn_row = QHBoxLayout()
+        btn_add_chain = QPushButton("➕ 添加到链")
+        btn_add_chain.clicked.connect(self._on_add_to_chain)
+        chain_btn_row.addWidget(btn_add_chain)
+
+        btn_apply_chain = QPushButton("▶ 应用整条链")
+        btn_apply_chain.clicked.connect(self._on_apply_chain)
+        chain_btn_row.addWidget(btn_apply_chain)
+
+        btn_clear_chain = QPushButton("清空")
+        btn_clear_chain.setObjectName("secondary")
+        btn_clear_chain.clicked.connect(self._on_clear_chain)
+        chain_btn_row.addWidget(btn_clear_chain)
+        self.right_layout.addLayout(chain_btn_row)
+
+        chain_arrow_row = QHBoxLayout()
+        btn_up = QPushButton("↑")
+        btn_up.setObjectName("secondary")
+        btn_up.setFixedWidth(32)
+        btn_up.clicked.connect(lambda: self._on_chain_move(-1))
+        chain_arrow_row.addWidget(btn_up)
+
+        btn_down = QPushButton("↓")
+        btn_down.setObjectName("secondary")
+        btn_down.setFixedWidth(32)
+        btn_down.clicked.connect(lambda: self._on_chain_move(+1))
+        chain_arrow_row.addWidget(btn_down)
+
+        btn_del = QPushButton("✕ 删除")
+        btn_del.setObjectName("secondary")
+        btn_del.clicked.connect(self._on_chain_remove)
+        chain_arrow_row.addWidget(btn_del)
+
+        btn_toggle = QPushButton("⇅ 启/禁")
+        btn_toggle.setObjectName("secondary")
+        btn_toggle.clicked.connect(self._on_chain_toggle)
+        chain_arrow_row.addWidget(btn_toggle)
+        self.right_layout.addLayout(chain_arrow_row)
+
+        preset_row = QHBoxLayout()
+        self.preset_combo = QComboBox()
+        self.preset_combo.setMinimumWidth(140)
+        self._refresh_preset_combo()
+        preset_row.addWidget(self.preset_combo, 1)
+
+        btn_save_preset = QPushButton("💾 保存")
+        btn_save_preset.clicked.connect(self._on_save_preset)
+        preset_row.addWidget(btn_save_preset)
+
+        btn_load_preset = QPushButton("加载")
+        btn_load_preset.clicked.connect(self._on_load_preset)
+        preset_row.addWidget(btn_load_preset)
+
+        btn_del_preset = QPushButton("删除")
+        btn_del_preset.setObjectName("secondary")
+        btn_del_preset.clicked.connect(self._on_delete_preset)
+        preset_row.addWidget(btn_del_preset)
+        self.right_layout.addLayout(preset_row)
+
+        self._refresh_chain_list()
         self._add_stretch()
+
+    def _refresh_chain_list(self) -> None:
+        self._chain_list.clear()
+        for i, step in enumerate(self._filter_chain):
+            defn = step.filter_def
+            label = f"{'🔸' if step.enabled else '🔹'} {i + 1}. {defn.display_name if defn else step.filter_key}"
+            if step.params:
+                def safe_val(v):
+                    if isinstance(v, float):
+                        return f"{v:.2f}"
+                    return str(v)
+                param_str = ", ".join(f"{k}={safe_val(v)}" for k, v in step.params.items() if defn is None or (defn.default_params().get(k) != v if defn else True))
+                if param_str:
+                    label += f"  [{param_str}]"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, i)
+            if not step.enabled:
+                item.setForeground(Qt.gray)
+            self._chain_list.addItem(item)
+
+    def _on_add_to_chain(self) -> None:
+        items = self.filter_list.selectedItems()
+        if not items:
+            self._show_info("请先从上方选择一个滤镜")
+            return
+        key = items[0].data(Qt.UserRole)
+        params = self.filter_param_widget.current_params() if self.filter_param_widget.filter_def() and self.filter_param_widget.filter_def().key == key else None
+        try:
+            self._filter_chain.add(key, params=params if params else None)
+        except KeyError as e:
+            QMessageBox.warning(self, "添加失败", str(e))
+            return
+        self._refresh_chain_list()
+
+    def _on_apply_chain(self) -> None:
+        img = self.preview._original
+        if img is None:
+            self._show_info("请先打开一张图片")
+            return
+        if len(self._filter_chain) == 0:
+            self._show_info("滤镜链为空")
+            return
+        ok, errs = self._filter_chain.validate_all()
+        if not ok:
+            QMessageBox.warning(self, "参数错误", "\n".join(errs))
+            return
+        worker = make_filter_chain_worker(img.copy(), self._filter_chain)
+        task = self.task_queue.enqueue(f"滤镜链 · {len(self._filter_chain)} 步骤", worker)
+        self._preview_task = task
+        task.signals.finished.connect(self._on_chain_apply_done)
+        task.signals.failed.connect(self._on_chain_apply_failed)
+        task.signals.cancelled.connect(self._on_chain_apply_cancelled)
+        self.task_dock.show()
+
+    def _on_chain_apply_done(self, result) -> None:
+        if self._preview_task is not None and self.sender() is not None:
+            self._preview_task = None
+        if result is not None:
+            self.preview.update_current(result)
+            self.statusBar().showMessage("滤镜链应用完成", 3000)
+
+    def _on_chain_apply_failed(self, err_msg: str) -> None:
+        if self._preview_task is not None:
+            self._preview_task = None
+        QMessageBox.warning(self, "滤镜链失败", err_msg)
+
+    def _on_chain_apply_cancelled(self) -> None:
+        if self._preview_task is not None:
+            self._preview_task = None
+        self.statusBar().showMessage("滤镜链已取消", 3000)
+
+    def _on_clear_chain(self) -> None:
+        self._filter_chain.clear()
+        self._refresh_chain_list()
+
+    def _on_chain_move(self, direction: int) -> None:
+        items = self._chain_list.selectedItems()
+        if not items:
+            return
+        idx = items[0].data(Qt.UserRole)
+        if direction < 0:
+            self._filter_chain.move_up(idx)
+        else:
+            self._filter_chain.move_down(idx)
+        self._refresh_chain_list()
+        if 0 <= idx + direction < len(self._filter_chain):
+            self._chain_list.setCurrentRow(idx + direction)
+
+    def _on_chain_remove(self) -> None:
+        items = self._chain_list.selectedItems()
+        if not items:
+            return
+        idx = items[0].data(Qt.UserRole)
+        self._filter_chain.remove(idx)
+        self._refresh_chain_list()
+
+    def _on_chain_toggle(self) -> None:
+        items = self._chain_list.selectedItems()
+        if not items:
+            return
+        idx = items[0].data(Qt.UserRole)
+        step = self._filter_chain[idx]
+        self._filter_chain.enable(idx, not step.enabled)
+        self._refresh_chain_list()
+
+    def _on_chain_step_selected(self) -> None:
+        items = self._chain_list.selectedItems()
+        if not items:
+            return
+        idx = items[0].data(Qt.UserRole)
+        step = self._filter_chain[idx]
+        defn = step.filter_def
+        if defn is not None:
+            self.filter_param_widget.set_filter_def(defn)
+
+    def _refresh_preset_combo(self) -> None:
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        self.preset_combo.addItem("(无)")
+        for p in list_presets():
+            self.preset_combo.addItem(p["name"])
+        self.preset_combo.blockSignals(False)
+
+    def _on_save_preset(self) -> None:
+        if len(self._filter_chain) == 0:
+            self._show_info("滤镜链为空，无法保存")
+            return
+        name, ok = QInputDialog.getText(self, "保存预设", "预设名称:",
+                                         text=self._filter_chain.name or "我的预设")
+        if not ok or not name.strip():
+            return
+        try:
+            self._filter_chain.name = name.strip()
+            save_preset(name.strip(), self._filter_chain, overwrite=True)
+            self.statusBar().showMessage(f"预设已保存: {name}", 3000)
+            self._refresh_preset_combo()
+            self.preset_combo.setCurrentText(name.strip())
+        except Exception as e:
+            QMessageBox.warning(self, "保存失败", str(e))
+
+    def _on_load_preset(self) -> None:
+        name = self.preset_combo.currentText()
+        if not name or name == "(无)":
+            self._show_info("请先选择一个预设")
+            return
+        try:
+            loaded = load_preset(name)
+            self._filter_chain = loaded
+            self._refresh_chain_list()
+            self.statusBar().showMessage(f"预设已加载: {name} · {len(loaded)} 步骤", 3000)
+        except Exception as e:
+            QMessageBox.warning(self, "加载失败", str(e))
+
+    def _on_delete_preset(self) -> None:
+        name = self.preset_combo.currentText()
+        if not name or name == "(无)":
+            return
+        reply = QMessageBox.question(self, "删除预设",
+                                     f"确认删除预设 '{name}'?",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        if delete_preset(name):
+            self.statusBar().showMessage(f"预设已删除: {name}", 3000)
+        self._refresh_preset_combo()
+
+    def _on_filter_selected(self) -> None:
+        items = self.filter_list.selectedItems()
+        if not items:
+            self.filter_param_widget.set_filter_def(None)
+            return
+        key = items[0].data(Qt.UserRole)
+        defn = FilterDefRegistry.instance().get(key)
+        self.filter_param_widget.set_filter_def(defn)
+
+    def _on_filter_params_changed(self, params: dict) -> None:
+        if self.preview._original is None:
+            return
+        defn = self.filter_param_widget.filter_def()
+        if defn is None or not defn.preview_supported:
+            return
+        self._pending_preview_params = params
+        self._pending_preview_key = defn.key
+        self._preview_timer.start()
+
+    def _do_single_filter_preview(self) -> None:
+        img = self.preview._original
+        if img is None or self._pending_preview_key is None:
+            return
+        defn = self.filter_param_widget.filter_def()
+        if defn is None or defn.key != self._pending_preview_key:
+            return
+        params = self._pending_preview_params or {}
+        preview_chain = FilterChain()
+        try:
+            preview_chain.add(defn.key, params=params if params else None)
+        except Exception:
+            return
+        cache_key = preview_cache_key(img, preview_chain)
+        cached = preview_cache_get(cache_key)
+        if cached is not None:
+            self.preview.update_current(cached)
+            return
+        if self._preview_task is not None:
+            try:
+                self._preview_task.cancel()
+            except Exception:
+                pass
+            self._preview_task = None
+        worker = make_filter_chain_worker(img.copy(), preview_chain)
+        task = self.task_queue.enqueue(f"参数预览 · {defn.display_name}", worker)
+        self._preview_task = task
+        task.signals.finished.connect(self._on_single_filter_preview_done)
+        task.signals.failed.connect(self._on_single_filter_preview_failed)
+
+    def _on_single_filter_preview_done(self, result) -> None:
+        if self._preview_task is not None:
+            self._preview_task = None
+        if result is not None and self.preview._original is not None:
+            defn = self.filter_param_widget.filter_def()
+            if defn is not None:
+                preview_chain = FilterChain()
+                try:
+                    params = self._pending_preview_params or {}
+                    preview_chain.add(defn.key, params=params if params else None)
+                    cache_key = preview_cache_key(self.preview._original, preview_chain)
+                    preview_cache_set(cache_key, result)
+                except Exception:
+                    pass
+            self.preview.update_current(result)
+
+    def _on_single_filter_preview_failed(self, err_msg: str) -> None:
+        if self._preview_task is not None:
+            self._preview_task = None
 
     def _on_filter_apply(self, item: QListWidgetItem) -> None:
         key = item.data(Qt.UserRole)
@@ -645,6 +987,16 @@ class MainWindow(QMainWindow):
         if img is None:
             self._show_info("请先打开一张图片")
             return
+        defn = FilterDefRegistry.instance().get(key)
+        if defn is not None:
+            try:
+                params = self.filter_param_widget.current_params() if self.filter_param_widget.filter_def() and self.filter_param_widget.filter_def().key == key else None
+                result = defn.apply(img.copy(), params)
+                self.preview.update_current(result)
+                return
+            except Exception as e:
+                QMessageBox.warning(self, "滤镜失败", f"{defn.display_name}: {e}")
+                return
         try:
             result = apply_filter(key, img.copy())
             self.preview.update_current(result)
@@ -1514,6 +1866,13 @@ class MainWindow(QMainWindow):
             h, w = img.shape[:2]
             self.status_info.setText(f"{w}×{h}  |  {self._current_file or '未保存'}")
         self.status_zoom.setText(f"{int(self.preview.scale_value() * 100)}%")
+        if self._preview_task is not None:
+            try:
+                self._preview_task.cancel()
+            except Exception:
+                pass
+            self._preview_task = None
+        preview_cache_clear()
 
     def _on_mouse_moved(self, x: int, y: int) -> None:
         self.status_pos.setText(f"坐标: ({x}, {y})")
@@ -2213,30 +2572,124 @@ class MainWindow(QMainWindow):
         row2.addWidget(QLabel("输出格式:"))
         self.batch_fmt = QComboBox(); self.batch_fmt.addItems(["PNG","JPEG","WebP","BMP"]); row2.addWidget(self.batch_fmt)
         self.right_layout.addLayout(row2)
-        btn_run = QPushButton("批量转换格式")
-        btn_run.clicked.connect(self._run_batch)
-        self.right_layout.addWidget(btn_run)
+        row3 = QHBoxLayout()
+        self.batch_use_chain = QCheckBox("使用滤镜链")
+        self.batch_use_chain.stateChanged.connect(self._on_batch_mode_changed)
+        row3.addWidget(self.batch_use_chain)
+        self.right_layout.addLayout(row3)
+        row4 = QHBoxLayout()
+        self.batch_chain_preset = QComboBox()
+        self.batch_chain_preset.setPlaceholderText("(当前滤镜链)")
+        self._refresh_batch_presets()
+        row4.addWidget(QLabel("滤镜链预设:"))
+        row4.addWidget(self.batch_chain_preset, 1)
+        self.right_layout.addLayout(row4)
+        row5 = QHBoxLayout()
+        self.batch_overwrite = QCheckBox("覆盖已存在")
+        self.batch_overwrite.setChecked(True)
+        row5.addWidget(self.batch_overwrite)
+        self.right_layout.addLayout(row5)
+        btn_run_batch_conv = QPushButton("批量转换格式")
+        btn_run_batch_conv.clicked.connect(lambda: self._run_batch(mode="convert"))
+        self.right_layout.addWidget(btn_run_batch_conv)
+        btn_run_batch_chain = QPushButton("▶ 批量滤镜链处理")
+        btn_run_batch_chain.setObjectName("primary")
+        btn_run_batch_chain.clicked.connect(lambda: self._run_batch(mode="chain"))
+        self.right_layout.addWidget(btn_run_batch_chain)
 
-    def _run_batch(self) -> None:
+    def _refresh_batch_presets(self) -> None:
+        self.batch_chain_preset.blockSignals(True)
+        self.batch_chain_preset.clear()
+        self.batch_chain_preset.addItem("(当前滤镜链)", userData=None)
+        for p in list_presets():
+            self.batch_chain_preset.addItem(p["name"], userData=p["name"])
+        self.batch_chain_preset.blockSignals(False)
+
+    def _on_batch_mode_changed(self, state: int) -> None:
+        pass
+
+    def _run_batch(self, mode: str = "convert") -> None:
         import glob
-        from processors import utils
-        d=self.batch_dir.text().strip()
-        if not d: return
-        exts=["*.png","*.jpg","*.jpeg","*.webp","*.bmp","*.tiff"]
-        files=[]
-        for e in exts: files.extend(glob.glob(os.path.join(d,e)))
-        if not files:
-            QMessageBox.warning(self,"无文件","目录中没有支持的图片")
+        d = self.batch_dir.text().strip()
+        if not d:
+            QMessageBox.warning(self, "提示", "请先选择图片目录")
             return
-        fmt=self.batch_fmt.currentText().lower(); out_dir=os.path.join(d,"batch_output"); os.makedirs(out_dir,exist_ok=True)
-        def worker(progress):
-            done=0
-            for i,f in enumerate(files,1):
-                img=utils.load_image(f); out_name=Path(f).stem+"."+fmt; utils.save_image(img,os.path.join(out_dir,out_name)); done+=1; progress(i*100//len(files))
-            return done
-        task=self.task_queue.enqueue(f"批量转换 · {len(files)} 张",worker)
-        task.signals.finished.connect(lambda n:self.statusBar().showMessage(f"批量处理完成：{n} 张",5000))
-        self.task_dock.show()
+        exts = ["*.png","*.jpg","*.jpeg","*.webp","*.bmp","*.tiff","*.tif"]
+        files = []
+        for e in exts:
+            files.extend(glob.glob(os.path.join(d, e)))
+        if not files:
+            QMessageBox.warning(self, "无文件", "目录中没有支持的图片")
+            return
+        fmt = self.batch_fmt.currentText().lower()
+        overwrite = self.batch_overwrite.isChecked()
+        out_dir = os.path.join(d, "batch_output")
+        os.makedirs(out_dir, exist_ok=True)
+
+        if mode == "chain":
+            chain_preset_name = self.batch_chain_preset.currentData()
+            if chain_preset_name:
+                try:
+                    chain = load_preset(chain_preset_name)
+                except Exception as e:
+                    QMessageBox.warning(self, "加载预设失败", str(e))
+                    return
+            elif len(self._filter_chain) > 0:
+                chain = self._filter_chain
+            else:
+                QMessageBox.warning(self, "提示", "请先在滤镜面板构建滤镜链或选择预设")
+                return
+            def chain_worker(qprogress, qcancel):
+                last_progress = [0]
+                def progress_cb(i, total, status):
+                    pct = int(i * 100 // max(1, total))
+                    if pct != last_progress[0]:
+                        last_progress[0] = pct
+                        qprogress(pct)
+                result = run_batch_filter_chain(
+                    files, chain,
+                    output_dir=out_dir,
+                    output_format=self.batch_fmt.currentText(),
+                    progress_cb=progress_cb,
+                    cancel_token=qcancel,
+                    overwrite=overwrite,
+                )
+                qprogress(100)
+                return result
+            task = self.task_queue.enqueue(f"批量滤镜链 · {len(files)} 张", chain_worker)
+            task.signals.finished.connect(self._on_batch_chain_done)
+            task.signals.failed.connect(lambda err: QMessageBox.warning(self, "批量失败", err))
+            self.task_dock.show()
+        else:
+            from processors import utils
+            def conv_worker(progress):
+                done = 0
+                for i, f in enumerate(files, 1):
+                    img = utils.load_image(f)
+                    out_name = Path(f).stem + "." + fmt
+                    utils.save_image(img, os.path.join(out_dir, out_name))
+                    done += 1
+                    progress(i * 100 // len(files))
+                return done
+            task = self.task_queue.enqueue(f"批量转换 · {len(files)} 张", conv_worker)
+            task.signals.finished.connect(
+                lambda n: self.statusBar().showMessage(f"批量转换完成：{n} 张", 5000))
+            self.task_dock.show()
+
+    def _on_batch_chain_done(self, result: BatchFilterChainResult) -> None:
+        if not isinstance(result, BatchFilterChainResult):
+            self.statusBar().showMessage("批量完成", 5000)
+            return
+        msg = (f"共 {result.total} · 成功 {result.succeeded} · 失败 {result.failed}"
+               f" · 取消 {result.cancelled}")
+        self.statusBar().showMessage(msg, 8000)
+        failed_items = [(str(item.source), item.error) for item in result.items
+                        if item.status.value == "failed"]
+        if failed_items:
+            detail = "\n".join(f"· {p}: {e}" for p, e in failed_items[:10])
+            if len(failed_items) > 10:
+                detail += f"\n... 还有 {len(failed_items) - 10} 个失败"
+            QMessageBox.information(self, "批量完成", f"{msg}\n\n失败详情:\n{detail}")
 
     def _build_lut_panel(self) -> None:
         from processors.lut import LUT_PRESETS
@@ -2827,6 +3280,599 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("ImageToolbox 对齐操作完成", 4000)
         except Exception as e:
             QMessageBox.warning(self, "操作失败", str(e))
+
+    def _build_crypto_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("📦 Base64 编解码")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("选择文件 → Base64"))
+        btn = QPushButton("📤 编码")
+        btn.clicked.connect(lambda: self._crypto_base64("encode"))
+        row.addWidget(btn)
+        self.right_layout.addLayout(row)
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Base64 → 原始文件"))
+        btn2 = QPushButton("📥 解码")
+        btn2.clicked.connect(lambda: self._crypto_base64("decode"))
+        row2.addWidget(btn2)
+        self.right_layout.addLayout(row2)
+
+        self._add_section("🗜️ 图片归档")
+        btn_arch = QPushButton("📦 把多张图片打成 ZIP")
+        btn_arch.clicked.connect(self._crypto_archive)
+        self.right_layout.addWidget(btn_arch)
+
+        self._add_section("🔐 文件加密 / 解密")
+        form = QFormLayout()
+        self.crypto_pwd = QLineEdit(); self.crypto_pwd.setEchoMode(QLineEdit.Password)
+        form.addRow("密码:", self.crypto_pwd)
+        self.right_layout.addLayout(form)
+        row3 = QHBoxLayout()
+        btn_enc = QPushButton("🔒 加密文件")
+        btn_enc.clicked.connect(lambda: self._crypto_file("encrypt"))
+        row3.addWidget(btn_enc)
+        btn_dec = QPushButton("🔓 解密文件")
+        btn_dec.clicked.connect(lambda: self._crypto_file("decrypt"))
+        row3.addWidget(btn_dec)
+        self.right_layout.addLayout(row3)
+        self._add_stretch()
+
+    def _crypto_base64(self, mode: str) -> None:
+        from processors import parity
+        if mode == "encode":
+            src, _ = QFileDialog.getOpenFileName(self, "选择要编码的文件")
+            if not src: return
+            out, _ = QFileDialog.getSaveFileName(self, "保存 Base64", "", "Text (*.txt)")
+            if out:
+                parity.run_parity_tool("base64-encode", path=src, output=out)
+                self.statusBar().showMessage("Base64 编码完成", 3000)
+        else:
+            src, _ = QFileDialog.getOpenFileName(self, "选择 Base64 文件", "", "Text (*.txt)")
+            if not src: return
+            out, _ = QFileDialog.getSaveFileName(self, "保存解码结果")
+            if out:
+                parity.run_parity_tool("base64-decode", path=src, output=out)
+                self.statusBar().showMessage("Base64 解码完成", 3000)
+
+    def _crypto_archive(self) -> None:
+        from processors import parity
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择图片", "", "图片 (*.png *.jpg *.jpeg *.webp *.bmp *.tiff)")
+        if not paths: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存 ZIP", "", "ZIP (*.zip)")
+        if out:
+            parity.run_parity_tool("archive", paths=paths, output=out)
+            self.statusBar().showMessage(f"已归档 {len(paths)} 张图片", 3000)
+
+    def _crypto_file(self, mode: str) -> None:
+        from processors import parity
+        pwd = self.crypto_pwd.text().strip()
+        if not pwd:
+            QMessageBox.information(self, "提示", "请先输入密码"); return
+        src, _ = QFileDialog.getOpenFileName(self, "选择文件")
+        if not src: return
+        ext = ".enc" if mode == "encrypt" else ""
+        out, _ = QFileDialog.getSaveFileName(self, "保存结果", src + ext)
+        if out:
+            parity.run_parity_tool("encrypt" if mode == "encrypt" else "decrypt",
+                                   path=src, output=out, password=pwd)
+            self.statusBar().showMessage("加密/解密完成", 3000)
+
+    def _build_split_stack_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("✂️ 网格分割")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("行数:")); self.split_rows = QSpinBox(); self.split_rows.setRange(1,20); self.split_rows.setValue(2)
+        row.addWidget(self.split_rows)
+        row.addWidget(QLabel("列数:")); self.split_cols = QSpinBox(); self.split_cols.setRange(1,20); self.split_cols.setValue(2)
+        row.addWidget(self.split_cols)
+        self.right_layout.addLayout(row)
+        btn = QPushButton("✂️ 分割当前图片")
+        btn.clicked.connect(self._split_grid)
+        self.right_layout.addWidget(btn)
+
+        self._add_section("📚 图片堆叠")
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("方向:")); self.stack_dir = QComboBox(); self.stack_dir.addItems(["vertical 纵向","horizontal 横向"])
+        row2.addWidget(self.stack_dir)
+        row2.addWidget(QLabel("间距(px):")); self.stack_spacing = QSpinBox(); self.stack_spacing.setRange(0,200); self.stack_spacing.setValue(0)
+        row2.addWidget(self.stack_spacing)
+        self.right_layout.addLayout(row2)
+        btn2 = QPushButton("📚 堆叠多张图片")
+        btn2.clicked.connect(self._stack_imgs)
+        self.right_layout.addWidget(btn2)
+
+        self._add_section("🖱️ 手动切割 (选区保存)")
+        btn3 = QPushButton("🖱️ 选区域切出")
+        btn3.clicked.connect(self._cut_image)
+        self.right_layout.addWidget(btn3)
+        self._add_stretch()
+
+    def _split_grid(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        out_dir = QFileDialog.getExistingDirectory(self, "选择输出目录")
+        if not out_dir: return
+        files = parity.run_parity_tool("split-grid", path=src, output_dir=out_dir,
+                                      rows=self.split_rows.value(), cols=self.split_cols.value())
+        self.statusBar().showMessage(f"分割完成: {len(files)} 张", 3000)
+
+    def _stack_imgs(self) -> None:
+        from processors import parity
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择要堆叠的图片")
+        if not paths: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存堆叠结果", "", "PNG (*.png)")
+        if out:
+            dir_ = "vertical" if "vertical" in self.stack_dir.currentText() else "horizontal"
+            parity.run_parity_tool("stack", paths=paths, output=out, direction=dir_,
+                                   spacing=self.stack_spacing.value())
+            self.statusBar().showMessage("堆叠完成", 3000)
+
+    def _cut_image(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        x, ok = QInputDialog.getInt(self, "X 起始", "X:", 0, 0, 100000)
+        if not ok: return
+        y, ok = QInputDialog.getInt(self, "Y 起始", "Y:", 0, 0, 100000)
+        if not ok: return
+        w, ok = QInputDialog.getInt(self, "宽度", "宽度:", 100, 1, 100000)
+        if not ok: return
+        h, ok = QInputDialog.getInt(self, "高度", "高度:", 100, 1, 100000)
+        if not ok: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存切割结果", "", "PNG (*.png)")
+        if out:
+            parity.run_parity_tool("cut", path=src, output=out, x=x, y=y, width=w, height=h)
+            self.statusBar().showMessage("切割完成", 3000)
+
+    def _build_palette_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("🎨 从图片提取主色调")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("颜色数:")); self.palette_count = QSpinBox(); self.palette_count.setRange(2,32); self.palette_count.setValue(8)
+        row.addWidget(self.palette_count)
+        self.right_layout.addLayout(row)
+        btn = QPushButton("🎨 提取主色调")
+        btn.clicked.connect(self._extract_palette)
+        self.right_layout.addWidget(btn)
+        self.palette_list = QListWidget(); self.palette_list.setMinimumHeight(200)
+        self.right_layout.addWidget(self.palette_list)
+
+        self._add_section("🖱️ 取色器 (X,Y → 颜色)")
+        row2 = QHBoxLayout()
+        btn2 = QPushButton("🖱️ 取当前图片像素")
+        btn2.clicked.connect(self._color_sample)
+        row2.addWidget(btn2)
+        self.right_layout.addLayout(row2)
+
+        self._add_section("🔄 颜色替换")
+        row3 = QHBoxLayout()
+        self.color_src = QLineEdit("#ffffff")
+        self.color_dst = QLineEdit("#ff00aa")
+        row3.addWidget(QLabel("源:")); row3.addWidget(self.color_src)
+        row3.addWidget(QLabel("→ 目标:")); row3.addWidget(self.color_dst)
+        self.right_layout.addLayout(row3)
+        btn3 = QPushButton("🔄 执行颜色替换")
+        btn3.clicked.connect(self._color_replace)
+        self.right_layout.addWidget(btn3)
+
+        self._add_section("📄 调色板 PDF 导出")
+        btn4 = QPushButton("📄 生成 PDF")
+        btn4.clicked.connect(self._palette_pdf)
+        self.right_layout.addWidget(btn4)
+        self._add_stretch()
+
+    def _extract_palette(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        colors = parity.run_parity_tool("palette", path=src, count=self.palette_count.value())
+        self.palette_list.clear()
+        for c in colors:
+            self.palette_list.addItem(c)
+        self.statusBar().showMessage(f"提取到 {len(colors)} 个颜色", 3000)
+
+    def _color_sample(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        x, ok = QInputDialog.getInt(self, "X:", "X 坐标:", 0, 0, 100000)
+        if not ok: return
+        y, ok = QInputDialog.getInt(self, "Y:", "Y 坐标:", 0, 0, 100000)
+        if not ok: return
+        info = parity.run_parity_tool("color-sample", path=src, x=x, y=y)
+        QMessageBox.information(self, "取色结果", "\n".join(f"{k}: {v}" for k, v in info.items()))
+
+    def _color_replace(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存结果", "", "PNG (*.png)")
+        if out:
+            parity.run_parity_tool("color-replace", path=src, output=out,
+                                   source=self.color_src.text(), target=self.color_dst.text())
+            self.statusBar().showMessage("颜色替换完成", 3000)
+
+    def _palette_pdf(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存 PDF", "", "PDF (*.pdf)")
+        if out:
+            parity.run_parity_tool("palette-pdf", path=src, output=out)
+            self.statusBar().showMessage("调色板 PDF 生成完成", 3000)
+
+    def _build_draw_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("🖊️ 在图片上添加文字")
+        form = QFormLayout()
+        self.draw_text = QLineEdit("Hello Toolbox")
+        form.addRow("文字:", self.draw_text)
+        self.draw_x = QSpinBox(); self.draw_x.setRange(0, 100000); self.draw_x.setValue(32)
+        self.draw_y = QSpinBox(); self.draw_y.setRange(0, 100000); self.draw_y.setValue(32)
+        form.addRow("X:", self.draw_x); form.addRow("Y:", self.draw_y)
+        self.draw_size = QSpinBox(); self.draw_size.setRange(8, 500); self.draw_size.setValue(48)
+        form.addRow("字号:", self.draw_size)
+        self.draw_color = QLineEdit("#ffffff"); form.addRow("颜色:", self.draw_color)
+        self.right_layout.addLayout(form)
+        btn = QPushButton("🖊️ 添加文字")
+        btn.clicked.connect(self._draw_text)
+        self.right_layout.addWidget(btn)
+
+        self._add_section("📏 添加边框 / 裁边")
+        row = QHBoxLayout()
+        self.border_w = QSpinBox(); self.border_w.setRange(1, 1000); self.border_w.setValue(20)
+        row.addWidget(QLabel("边框宽:")); row.addWidget(self.border_w)
+        self.border_color = QLineEdit("#ffffff"); row.addWidget(QLabel("颜色:")); row.addWidget(self.border_color)
+        self.right_layout.addLayout(row)
+        row2 = QHBoxLayout()
+        btn_border = QPushButton("➕ 添加边框")
+        btn_border.clicked.connect(self._add_border)
+        row2.addWidget(btn_border)
+        btn_crop = QPushButton("✂️ 自动裁边")
+        btn_crop.clicked.connect(self._auto_crop)
+        row2.addWidget(btn_crop)
+        self.right_layout.addLayout(row2)
+
+        self._add_section("💧 文字水印")
+        row3 = QHBoxLayout()
+        self.wm_text = QLineEdit("Toolbox Watermark"); row3.addWidget(self.wm_text)
+        self.wm_opacity = QSpinBox(); self.wm_opacity.setRange(10,255); self.wm_opacity.setValue(128); row3.addWidget(QLabel("不透明:")); row3.addWidget(self.wm_opacity)
+        self.right_layout.addLayout(row3)
+        btn_wm = QPushButton("💧 执行水印")
+        btn_wm.clicked.connect(self._draw_watermark)
+        self.right_layout.addWidget(btn_wm)
+        self._add_stretch()
+
+    def _draw_text(self) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存文字", ".png")
+        if src and out:
+            parity.run_parity_tool("text", path=src, output=out,
+                                   text=self.draw_text.text(),
+                                   x=self.draw_x.value(), y=self.draw_y.value(),
+                                   size=self.draw_size.value(), color=self.draw_color.text())
+            self.statusBar().showMessage("文字添加完成", 3000)
+
+    def _add_border(self) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存带边框图", ".png")
+        if src and out:
+            parity.run_parity_tool("border", path=src, output=out,
+                                   width=self.border_w.value(), color=self.border_color.text())
+            self.statusBar().showMessage("边框添加完成", 3000)
+
+    def _auto_crop(self) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存裁边结果", ".png")
+        if src and out:
+            parity.run_parity_tool("auto-crop", path=src, output=out)
+            self.statusBar().showMessage("自动裁边完成", 3000)
+
+    def _draw_watermark(self) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存水印图", ".png")
+        if src and out:
+            parity.run_parity_tool("watermark", path=src, output=out,
+                                   text=self.wm_text.text(), opacity=self.wm_opacity.value())
+            self.statusBar().showMessage("水印完成", 3000)
+
+    def _build_compress_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("🧪 JPEG / WebP 压缩")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("质量:")); self.compress_q = QSlider(Qt.Horizontal); self.compress_q.setRange(10,100); self.compress_q.setValue(82)
+        self.compress_label = QLabel("82")
+        self.compress_q.valueChanged.connect(lambda v: self.compress_label.setText(str(v)))
+        row.addWidget(self.compress_q); row.addWidget(self.compress_label)
+        self.right_layout.addLayout(row)
+        row2 = QHBoxLayout()
+        btn_jpg = QPushButton("🖼️ 保存为 JPEG")
+        btn_jpg.clicked.connect(lambda: self._compress_save("jpeg"))
+        row2.addWidget(btn_jpg)
+        btn_webp = QPushButton("🌐 保存为 WebP")
+        btn_webp.clicked.connect(lambda: self._compress_save("webp"))
+        row2.addWidget(btn_webp)
+        self.right_layout.addLayout(row2)
+
+        self._add_section("📐 按目标体积缩放")
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("目标 KB:")); self.weight_kb = QSpinBox(); self.weight_kb.setRange(10, 50000); self.weight_kb.setValue(200)
+        row3.addWidget(self.weight_kb)
+        self.right_layout.addLayout(row3)
+        btn_w = QPushButton("📐 智能调整到指定 KB")
+        btn_w.clicked.connect(self._compress_weight)
+        self.right_layout.addWidget(btn_w)
+
+        self._add_section("🔬 格式转换")
+        grid = QGridLayout()
+        for n, (title, fmt) in enumerate([("→ PNG", "png"), ("→ BMP", "bmp"), ("→ TIFF", "tiff"), ("→ GIF", "gif")]):
+            b = QPushButton(title)
+            b.clicked.connect(lambda checked=False, f=fmt: self._compress_fmt(f))
+            grid.addWidget(b, n // 2, n % 2)
+        self.right_layout.addLayout(grid)
+        self._add_stretch()
+
+    def _compress_save(self, fmt: str) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        ext = ".jpg" if fmt == "jpeg" else ".webp"
+        mime = "JPEG (*.jpg)" if fmt == "jpeg" else "WebP (*.webp)"
+        out, _ = QFileDialog.getSaveFileName(self, f"保存为 {fmt.upper()}", "", mime)
+        if out:
+            q = self.compress_q.value()
+            if fmt == "jpeg":
+                parity.run_parity_tool("compress", path=src, output=out, quality=q)
+            else:
+                parity.run_parity_tool("webp", path=src, output=out, quality=q)
+            self.statusBar().showMessage(f"压缩完成 (质量={q})", 3000)
+
+    def _compress_weight(self) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存", ".jpg")
+        if src and out:
+            parity.run_parity_tool("weight-resize", path=src, output=out,
+                                   target_kb=self.weight_kb.value())
+            self.statusBar().showMessage(f"已调整到 ~{self.weight_kb.value()}KB", 3000)
+
+    def _compress_fmt(self, fmt: str) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        out, _ = QFileDialog.getSaveFileName(self, f"保存为 {fmt.upper()}", "", f"{fmt.upper()} (*.{fmt})")
+        if out:
+            parity.run_parity_tool("convert", path=src, output=out, fmt=fmt.upper())
+            self.statusBar().showMessage(f"转换为 {fmt.upper()} 完成", 3000)
+
+    def _build_find_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("🔎 查找重复 / 相似图片")
+        btn_dup = QPushButton("🔁 选文件夹检测重复图片")
+        btn_dup.clicked.connect(self._find_duplicates)
+        self.right_layout.addWidget(btn_dup)
+        btn_sim = QPushButton("🔗 查找相似图片")
+        btn_sim.clicked.connect(self._find_similar)
+        self.right_layout.addWidget(btn_sim)
+
+        self._add_section("📊 图片详细信息")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("阈值:"))
+        self.sim_thr = QSpinBox(); self.sim_thr.setRange(1, 50); self.sim_thr.setValue(8)
+        row.addWidget(self.sim_thr)
+        self.right_layout.addLayout(row)
+
+        self.info_text = QTextEdit(); self.info_text.setReadOnly(True); self.info_text.setMinimumHeight(220)
+        self.right_layout.addWidget(self.info_text)
+        btn_info = QPushButton("📊 查看当前图片完整信息")
+        btn_info.clicked.connect(self._find_info)
+        self.right_layout.addWidget(btn_info)
+        self._add_stretch()
+
+    def _find_duplicates(self) -> None:
+        from processors import parity
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择图片进行重复检测", "", "图片 (*.png *.jpg *.jpeg *.webp *.bmp *.tiff)")
+        if not paths: return
+        groups = parity.run_parity_tool("duplicate-finder", paths=paths)
+        lines = []
+        if not groups:
+            lines.append("✅ 未发现重复图片")
+        else:
+            for g in groups.values():
+                lines.append("📌 重复组:")
+                for x in g: lines.append(f"  · {x}")
+        QMessageBox.information(self, f"检测结果 ({len(groups)} 组重复)", "\n".join(lines))
+
+    def _find_similar(self) -> None:
+        from processors import parity
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择图片进行相似检测", "", "图片 (*.png *.jpg *.jpeg *.webp *.bmp *.tiff)")
+        if not paths: return
+        similar = parity.run_parity_tool("similar", paths=paths, threshold=self.sim_thr.value())
+        self.info_text.setPlainText(str(similar))
+
+    def _find_info(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        info = parity.run_parity_tool("image-info", path=src)
+        lines = [f"📁 {src}", ""]
+        for k, v in info.items():
+            lines.append(f"  {k}: {v}")
+        self.info_text.setPlainText("\n".join(lines))
+
+    def _build_vector_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("🧬 格式转换工具箱")
+        grid = QGridLayout()
+        convs = [
+            ("🖼️ 图片 → SVG (矢量)", "svg", ".svg", "SVG (*.svg)"),
+            ("🌐 图片 → WebP 有损", "webp", ".webp", "WebP (*.webp)"),
+            ("📦 图片 → JXL (JPEG XL)", "jxl", ".jxl", "JXL (*.jxl)"),
+        ]
+        for n, (title, key, ext, mime) in enumerate(convs):
+            btn = QPushButton(title)
+            btn.clicked.connect(lambda checked=False, k=key, e=ext, m=mime: self._vector_do(k, e, m))
+            grid.addWidget(btn, n // 2, n % 2)
+        btn_wpl = QPushButton("🗜️ PNG → WebP 无损")
+        btn_wpl.clicked.connect(self._vector_webp_lossless)
+        grid.addWidget(btn_wpl, 1, 1)
+        self.right_layout.addLayout(grid)
+
+        self._add_section("🎬 动画格式")
+        grid2 = QGridLayout()
+        anims = [
+            ("GIF 帧 → APNG", "apng", "APNG (*.png)"),
+            ("多张 → WebP 动画", "animation-format", "Animated WebP (*.webp)"),
+            ("GIF → 帧序列", "gif-frames", ""),
+        ]
+        for n, (title, key, mime) in enumerate(anims):
+            btn = QPushButton(title)
+            btn.clicked.connect(lambda checked=False, k=key, m=mime: self._vector_do_multi(k, m))
+            grid2.addWidget(btn, n // 2, n % 2)
+        self.right_layout.addLayout(grid2)
+        self._add_stretch()
+
+    def _vector_do(self, key: str, ext: str, mime: str) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        if not mime: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存", "", mime)
+        if out:
+            parity.run_parity_tool(key, path=src, output=out)
+            self.statusBar().showMessage("转换完成", 3000)
+
+    def _vector_do_multi(self, key: str, mime: str) -> None:
+        from processors import parity
+        if key in {"apng", "animation-format"}:
+            paths, _ = QFileDialog.getOpenFileNames(self, "选择帧图片", "", "图片 (*.png *.jpg *.jpeg *.webp)")
+            if not paths: return
+            mime = mime or "Animated WebP (*.webp)"
+            out, _ = QFileDialog.getSaveFileName(self, "保存", "", mime)
+            if out:
+                parity.run_parity_tool(key, paths=paths, output=out)
+                self.statusBar().showMessage("动画制作完成", 3000)
+        elif key == "gif-frames":
+            src, _ = QFileDialog.getOpenFileName(self, "选择 GIF", "", "GIF (*.gif)")
+            if not src: return
+            out_dir = QFileDialog.getExistingDirectory(self, "选择输出目录")
+            if out_dir:
+                parity.run_parity_tool("gif-frames", path=src, output_dir=out_dir)
+                self.statusBar().showMessage("GIF 拆帧完成", 3000)
+
+    def _vector_webp_lossless(self) -> None:
+        from processors import parity
+        src = self._parity_input()
+        if not src: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存 WebP 无损", "", "WebP (*.webp)")
+        if out:
+            parity.webp_convert(path=src, output=out, lossless=True)
+            self.statusBar().showMessage("WebP 无损转换完成", 3000)
+
+    def _build_resize_ex_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("📐 限制最大尺寸缩放")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("最大宽:")); self.limit_w = QSpinBox(); self.limit_w.setRange(64,4096); self.limit_w.setValue(4096); row.addWidget(self.limit_w)
+        row.addWidget(QLabel("最大高:")); self.limit_h = QSpinBox(); self.limit_h.setRange(64,4096); self.limit_h.setValue(4096); row.addWidget(self.limit_h)
+        self.right_layout.addLayout(row)
+        btn = QPushButton("📐 应用限制缩放")
+        btn.clicked.connect(self._resize_limits)
+        self.right_layout.addWidget(btn)
+
+        self._add_section("📏 按体积自动缩放")
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("目标 KB:")); self.weight_kb2 = QSpinBox(); self.weight_kb2.setRange(10,50000); self.weight_kb2.setValue(300); row2.addWidget(self.weight_kb2)
+        self.right_layout.addLayout(row2)
+        btn2 = QPushButton("📏 智能调整")
+        btn2.clicked.connect(self._resize_weight)
+        self.right_layout.addWidget(btn2)
+
+        self._add_section("🖼️ 简单格式转换")
+        grid = QGridLayout()
+        for n, (title, fmt) in enumerate([("→ PNG", "png"),("→ JPEG", "jpg"),("→ WebP", "webp"),("→ BMP", "bmp")]):
+            b = QPushButton(title); b.clicked.connect(lambda checked=False, f=fmt: self._resize_fmt(f)); grid.addWidget(b, n//2, n%2)
+        self.right_layout.addLayout(grid)
+        self._add_stretch()
+
+    def _resize_limits(self) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存", ".png")
+        if src and out:
+            parity.run_parity_tool("limits-resize", path=src, output=out,
+                                   max_width=self.limit_w.value(), max_height=self.limit_h.value())
+            self.statusBar().showMessage("尺寸限制完成", 3000)
+
+    def _resize_weight(self) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存", ".jpg")
+        if src and out:
+            parity.run_parity_tool("weight-resize", path=src, output=out,
+                                   target_kb=self.weight_kb2.value())
+            self.statusBar().showMessage(f"调整到 ~{self.weight_kb2.value()}KB", 3000)
+
+    def _resize_fmt(self, fmt: str) -> None:
+        from processors import parity
+        src = self._parity_input(); out = self._parity_output("保存", f".{fmt}")
+        if src and out:
+            parity.run_parity_tool("convert", path=src, output=out, fmt=fmt.upper())
+            self.statusBar().showMessage(f"转换为 {fmt.upper()}", 3000)
+
+    def _build_collage_ex_panel(self) -> None:
+        from processors import parity
+        self._clear_right()
+        self._add_section("🧱 快速拼图 (Contact Sheet)")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("列数:")); self.collage_cols = QSpinBox(); self.collage_cols.setRange(1,20); self.collage_cols.setValue(4); row.addWidget(self.collage_cols)
+        row.addWidget(QLabel("缩略图宽:")); self.collage_thumb = QSpinBox(); self.collage_thumb.setRange(50,800); self.collage_thumb.setValue(240); row.addWidget(self.collage_thumb)
+        self.right_layout.addLayout(row)
+        btn = QPushButton("🧱 生成联系表拼图")
+        btn.clicked.connect(self._make_contact_sheet)
+        self.right_layout.addWidget(btn)
+
+        self._add_section("🖼️ 自由拼贴")
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("列数:")); self.free_cols = QSpinBox(); self.free_cols.setRange(1,20); self.free_cols.setValue(3); row2.addWidget(self.free_cols)
+        row2.addWidget(QLabel("单元宽:")); self.free_w = QSpinBox(); self.free_w.setRange(64,1000); self.free_w.setValue(400); row2.addWidget(self.free_w)
+        row2.addWidget(QLabel("间距:")); self.free_gap = QSpinBox(); self.free_gap.setRange(0,80); self.free_gap.setValue(16); row2.addWidget(self.free_gap)
+        self.right_layout.addLayout(row2)
+        btn2 = QPushButton("🖼️ 生成自由拼贴")
+        btn2.clicked.connect(self._make_collage)
+        self.right_layout.addWidget(btn2)
+        self._add_stretch()
+
+    def _make_contact_sheet(self) -> None:
+        from processors import parity
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择图片")
+        if not paths: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存拼图", "", "JPEG (*.jpg)")
+        if out:
+            parity.run_parity_tool("contact-sheet", paths=paths, output=out,
+                                   columns=self.collage_cols.value(), thumb=self.collage_thumb.value())
+            self.statusBar().showMessage("拼图完成", 3000)
+
+    def _make_collage(self) -> None:
+        from processors import parity
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择图片")
+        if not paths: return
+        out, _ = QFileDialog.getSaveFileName(self, "保存拼贴", "", "JPEG (*.jpg)")
+        if out:
+            parity.run_parity_tool("collage", paths=paths, output=out,
+                                   columns=self.free_cols.value(),
+                                   cell_width=self.free_w.value(),
+                                   spacing=self.free_gap.value())
+            self.statusBar().showMessage("拼贴完成", 3000)
+
+    def _build_crypto2_panel(self) -> None:
+        self._build_crypto_panel()
 
 
 def main() -> None:
