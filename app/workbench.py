@@ -19,7 +19,9 @@ class TaskSignals(QObject):
 
 
 class Task(QRunnable):
-    def __init__(self, name: str, fn: Callable[[Callable[[int], None]], object]):
+    _all_tasks: list["Task"] = []
+
+    def __init__(self, name: str, fn: Callable[[Callable[[int], None]], object], parent: QObject | None = None):
         super().__init__()
         self.name = name
         self.fn = fn
@@ -27,14 +29,30 @@ class Task(QRunnable):
         self.cancel_token = CancelToken()
         self.cancel_event = self.cancel_token.event
         self.pause_event = Event(); self.pause_event.set()
-        self.setAutoDelete(True)
+        self.setAutoDelete(False)
+        Task._all_tasks.append(self)
+        self._cleaned_up = False
+
+    @classmethod
+    def _cleanup_task(cls, task):
+        if task._cleaned_up:
+            return
+        task._cleaned_up = True
+        if task in cls._all_tasks:
+            cls._all_tasks.remove(task)
+        task.signals.deleteLater()
+
+    def _emit_safe(self, signal, *args) -> None:
+        try:
+            signal.emit(*args)
+        except RuntimeError:
+            pass
 
     def _progress(self, value: int):
-        while not self.pause_event.is_set() and not self.cancel_event.is_set():
-            self.cancel_event.wait(0.05)
+        self.pause_event.wait()
         if self.cancel_event.is_set():
             raise RuntimeError("任务已取消")
-        self.signals.progress.emit(int(value))
+        self._emit_safe(self.signals.progress, int(value))
 
     def pause(self): self.pause_event.clear()
     def resume(self): self.pause_event.set()
@@ -47,21 +65,24 @@ class Task(QRunnable):
             params = inspect.signature(self.fn).parameters
             result = self.fn(self._progress, self.cancel_token) if len(params) >= 2 else self.fn(self._progress)
             self.cancel_token.raise_if_cancelled()
-            self.signals.finished.emit(result)
-            self.signals.status.emit(f"完成 · {monotonic() - started:.1f}s")
+            self._emit_safe(self.signals.finished, result)
+            self._emit_safe(self.signals.status, f"完成 · {monotonic() - started:.1f}s")
         except CancelledError:
-            self.signals.cancelled.emit()
-            self.signals.status.emit(f"已取消 · {monotonic() - started:.1f}s")
+            self._emit_safe(self.signals.cancelled)
+            self._emit_safe(self.signals.status, f"已取消 · {monotonic() - started:.1f}s")
         except Exception as exc:
-            self.signals.failed.emit(str(exc))
-            self.signals.status.emit(f"失败 · {monotonic() - started:.1f}s")
+            self._emit_safe(self.signals.failed, str(exc))
+            self._emit_safe(self.signals.status, f"失败 · {monotonic() - started:.1f}s")
 
 
 class TaskQueueWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.pool = QThreadPool.globalInstance()
-        self.pool.setMaxThreadCount(max(1, min(4, self.pool.maxThreadCount())))
+        self.pool = QThreadPool()
+        # Full-resolution image work is memory hungry (a single 24MP float32
+        # stage is ~288MB), so keep concurrency bounded instead of racing eight
+        # pipelines at once.
+        self.pool.setMaxThreadCount(4)
         self.items = QListWidget(); self._tasks = {}
         self.add_button = QPushButton("添加测试任务"); self.clear_button = QPushButton("清空已完成")
         self.add_button.clicked.connect(lambda: self.enqueue("测试任务", self._demo))
@@ -69,16 +90,29 @@ class TaskQueueWidget(QWidget):
         controls=QHBoxLayout(); controls.addWidget(self.add_button); controls.addWidget(self.clear_button)
         layout=QVBoxLayout(self); layout.addLayout(controls); layout.addWidget(self.items)
 
+    def shutdown(self, timeout_ms: int = 3000) -> bool:
+        """Cancel every live task and wait briefly for the pool to drain.
+
+        Without this, destroying the private QThreadPool on window close blocks
+        until running tasks finish (minutes for the slowest filters).
+        """
+        for task in list(Task._all_tasks):
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        return self.pool.waitForDone(timeout_ms)
+
     def _demo(self, progress):
         import time
         for i in range(101): time.sleep(0.01); progress(i)
 
     def enqueue(self, name: str, fn: Callable[[Callable[[int], None]], object]):
-        task=Task(name,fn); row=QWidget(); lay=QHBoxLayout(row); lay.setContentsMargins(6,4,6,4)
-        label=QLabel(name); bar=QProgressBar(); bar.setRange(0,100); bar.setValue(0); pause=QPushButton("暂停"); cancel=QPushButton("取消")
+        task = Task(name, fn)
+        row = QWidget(); lay = QHBoxLayout(row); lay.setContentsMargins(6,4,6,4)
+        label = QLabel(name); bar = QProgressBar(); bar.setRange(0,100); bar.setValue(0); pause = QPushButton("暂停"); cancel = QPushButton("取消")
         lay.addWidget(label,1); lay.addWidget(bar,2); lay.addWidget(pause); lay.addWidget(cancel)
-        item=QListWidgetItem(); item.setSizeHint(row.sizeHint()); self.items.addItem(item); self.items.setItemWidget(item,row)
-        self._tasks[id(task)]=(task,item,label,pause,cancel,fn,name)
+        item = QListWidgetItem(); item.setSizeHint(row.sizeHint()); self.items.addItem(item); self.items.setItemWidget(item,row)
         def toggle():
             if pause.text()=="暂停": task.pause(); pause.setText("继续")
             else: task.resume(); pause.setText("暂停")
@@ -87,8 +121,11 @@ class TaskQueueWidget(QWidget):
         task.signals.status.connect(lambda text: label.setText(f"{name} · {text}"))
         task.signals.failed.connect(lambda err: label.setText(f"{name} · 失败: {err}"))
         task.signals.cancelled.connect(lambda: label.setText(f"{name} · 已取消"))
-        task.signals.finished.connect(lambda _result: (pause.setEnabled(False),cancel.setEnabled(False)))
-        task.signals.cancelled.connect(lambda: (pause.setEnabled(False),cancel.setEnabled(False)))
+        task.signals.finished.connect(lambda _: (pause.setEnabled(False), cancel.setEnabled(False), Task._cleanup_task(task)))
+        task.signals.cancelled.connect(lambda: (pause.setEnabled(False), cancel.setEnabled(False), Task._cleanup_task(task)))
+        # Failed tasks must be released too, otherwise Task._all_tasks pins the
+        # task object and the (often full-resolution) images its closure holds.
+        task.signals.failed.connect(lambda _err: (pause.setEnabled(False), cancel.setEnabled(False), Task._cleanup_task(task)))
         self.pool.start(task); return task
 
     def _clear_done(self):
@@ -100,6 +137,8 @@ class TaskQueueWidget(QWidget):
 
 
 class LogWidget(QWidget):
+    MAX_MESSAGES = 5000
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.editor = QPlainTextEdit(); self.editor.setReadOnly(True)
@@ -116,8 +155,19 @@ class LogWidget(QWidget):
         layout = QVBoxLayout(self); layout.addLayout(top); layout.addWidget(self.editor)
 
     def log(self, message: str):
-        self._messages.append(str(message))
-        self._refresh()
+        text = str(message)
+        self._messages.append(text)
+        if len(self._messages) > self.MAX_MESSAGES:
+            del self._messages[:len(self._messages) - self.MAX_MESSAGES]
+            self._refresh()
+            return
+        if self._filter_active():
+            self._refresh()
+            return
+        # Common path: append just the new line instead of rebuilding the whole
+        # document, which made logging O(n^2) over a long session.
+        self.editor.appendPlainText(text)
+        self._scroll_to_end()
 
     def clear(self):
         self._messages.clear(); self.editor.clear()
@@ -127,10 +177,16 @@ class LogWidget(QWidget):
         level = self.level_filter.text().strip().lower()
         return [m for m in self._messages if (not query or query in m.lower()) and (not level or level in m.lower())]
 
-    def _refresh(self):
-        self.editor.setPlainText("\n".join(self.filtered_messages()))
+    def _filter_active(self) -> bool:
+        return bool(self.filter_input.text().strip() or self.level_filter.text().strip())
+
+    def _scroll_to_end(self) -> None:
         if self.auto_scroll.isChecked():
             cursor = self.editor.textCursor(); cursor.movePosition(cursor.MoveOperation.End); self.editor.setTextCursor(cursor)
+
+    def _refresh(self):
+        self.editor.setPlainText("\n".join(self.filtered_messages()))
+        self._scroll_to_end()
 
     def export(self, kind: str, path: str | None = None) -> str | None:
         if path is None:

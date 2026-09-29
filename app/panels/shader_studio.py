@@ -22,14 +22,20 @@ class GLSLHighlighter(QSyntaxHighlighter):
             for m in re.finditer(pat,text): self.setFormat(m.start(),m.end()-m.start(),self._fmt(color,bold))
 
 class LineEditor(QPlainTextEdit):
+    GUTTER_W = 48
     def __init__(self):
         super().__init__(); self.setFont(QFont('Maple Mono',11)); self.setTabStopDistance(32); self.highlighter=GLSLHighlighter(self.document())
-        self.blockCountChanged.connect(lambda _: self.setViewportMargins(48,0,0,0)); self.updateRequest.connect(self._update); self._update_gutter_width()
-    def _update_gutter_width(self): self.setViewportMargins(48,0,0,0)
+        # The gutter must exist before any updateRequest can arrive: creating it
+        # lazily in resizeEvent made _update raise AttributeError on the first
+        # layout/paint pass (updateRequest fires before resizeEvent).
+        self._gutter=QWidget(self); self._gutter.paintEvent=self._paint_gutter; self._gutter.show()
+        self.blockCountChanged.connect(lambda _: self._update_gutter_width()); self.updateRequest.connect(self._update); self._update_gutter_width()
+    def _update_gutter_width(self): self.setViewportMargins(self.GUTTER_W,0,0,0)
     def _update(self,rect,dy):
         if dy: self._gutter.scroll(0,dy)
-        else: self._gutter.update(0,rect.y(),48,rect.height())
-    def resizeEvent(self,e): super().resizeEvent(e); self._gutter= getattr(self,'_gutter',None) or QWidget(self); self._gutter.setGeometry(0,0,48,self.height()); self._gutter.paintEvent=self._paint_gutter; self._gutter.show()
+        else: self._gutter.update(0,rect.y(),self.GUTTER_W,rect.height())
+    def resizeEvent(self,e):
+        super().resizeEvent(e); self._gutter.setGeometry(0,0,self.GUTTER_W,self.height())
     def _paint_gutter(self,event):
         p=QPainter(self._gutter); p.fillRect(event.rect(),QColor('#181825')); block=self.firstVisibleBlock(); n=block.blockNumber(); top=int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
         while block.isValid() and top<=event.rect().bottom():

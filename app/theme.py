@@ -1,4 +1,56 @@
-LIGHT_QSS = """
+from __future__ import annotations
+
+from PySide6.QtGui import QPalette
+
+
+def _hex(color) -> str:
+    return f"#{color.red():02x}{color.green():02x}{color.blue():02x}"
+
+
+def build_system_qss(pal: QPalette) -> str:
+    window = _hex(pal.color(QPalette.Window))
+    base = _hex(pal.color(QPalette.Base))
+    alt_base = _hex(pal.color(QPalette.AlternateBase))
+    text = _hex(pal.color(QPalette.Text))
+    button = _hex(pal.color(QPalette.Button))
+    button_text = _hex(pal.color(QPalette.ButtonText))
+    highlight = _hex(pal.color(QPalette.Highlight))
+    highlighted_text = _hex(pal.color(QPalette.HighlightedText))
+    tooltip_bg = _hex(pal.color(QPalette.ToolTipBase))
+    tooltip_text = _hex(pal.color(QPalette.ToolTipText))
+    mid = _hex(pal.color(QPalette.Mid))
+    midlight = _hex(pal.color(QPalette.Midlight))
+    dark = _hex(pal.color(QPalette.Dark))
+
+    return f"""
+QLabel#sectionDivider {{ color: {mid}; max-height: 1px; }}
+QWidget#palettePanel {{ background: {base}; border: 1px solid {mid}; border-radius: 6px; }}
+QLabel#hintTip {{ color: {mid}; font-size: 12px; }}
+QLabel#histogramBox {{ border: 1px solid {mid}; }}
+QLabel#section {{ font-size: 14px; font-weight: 600; color: {text}; padding: 8px 2px; }}
+QLabel#hint {{ color: {mid}; font-size: 12px; }}
+"""
+
+
+def _append_shared(name: str, extra: str) -> str:
+    return name.rstrip() + "\n" + extra + "\n"
+
+
+_LIGHT_EXTRA = """
+QLabel#sectionDivider { color: #d8dbe2; max-height: 1px; }
+QWidget#palettePanel { background: #ffffff; border: 1px solid #d8dbe2; border-radius: 6px; }
+QLabel#hintTip { color: #7f849c; font-size: 12px; }
+QLabel#histogramBox { border: 1px solid #585b70; }
+"""
+
+_DARK_EXTRA = """
+QLabel#sectionDivider { color: #45475a; max-height: 1px; }
+QWidget#palettePanel { background: #181825; border: 1px solid #45475a; border-radius: 6px; }
+QLabel#hintTip { color: #a6adc8; font-size: 12px; }
+QLabel#histogramBox { border: 1px solid #45475a; }
+"""
+
+LIGHT_QSS = _append_shared("""
 * { font-family: "MiSans", "MiSans Normal", "MiSans Regular", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; font-size: 13px; }
 QMainWindow, QWidget { background-color: #f7f7fb; color: #2b2d31; }
 QToolBar { background: #ffffff; border-bottom: 1px solid #d8dbe2; spacing: 4px; padding: 4px; }
@@ -86,9 +138,10 @@ QScrollBar::handle:vertical:hover { background: #7f849c; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 
 QSplitter::handle { background: #313244; width: 2px; }
-"""
+""", _LIGHT_EXTRA)
 
-DARK_QSS = """
+
+DARK_QSS = _append_shared("""
 * { font-family: "MiSans", "MiSans Normal", "MiSans Regular", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; font-size: 13px; }
 QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; }
 QToolBar { background: #181825; border-bottom: 1px solid #313244; spacing: 6px; padding: 7px 10px; }
@@ -150,4 +203,4 @@ QSplitter::handle { background: #45475a; width: 2px; }
 QLabel#appTitle { font-size: 18px; font-weight: 800; letter-spacing: 1px; padding: 8px 6px 4px; color: #cba6f7; }
 QLineEdit#toolSearch { padding: 9px 12px; border-radius: 11px; border: 1px solid #45475a; background: #11111b; color: #cdd6f4; selection-background-color: #cba6f7; }
 QListWidget#SidebarList { border: none; outline: none; background: transparent; }
-"""
+""", _DARK_EXTRA)

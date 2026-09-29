@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QSlider, QPushButton, QComboBox, QCheckBox, QGroupBox, QVBoxLayout,
     QHBoxLayout, QFormLayout, QScrollArea, QFrame, QTabWidget, QGridLayout,
     QSizePolicy, QColorDialog, QApplication, QProgressDialog, QTextEdit,
-    QInputDialog, QLineEdit, QDialog, QDialogButtonBox, QCheckBox
+    QInputDialog, QLineEdit, QDialog, QDialogButtonBox
 )
 
 from processors.utils import load_image, save_image, u8, clamp
@@ -23,6 +23,7 @@ from processors.filter_defs import FilterDefRegistry
 from processors.filter_chain import FilterChain, FilterStep, FilterStepError
 from processors.filter_presets import save_preset, load_preset, list_presets, delete_preset, preset_exists
 from processors.filter_chain_task import (
+    downscale_preview,
     make_filter_chain_worker,
     run_filter_chain_sync,
     preview_cache_key,
@@ -35,7 +36,7 @@ from processors.cancellation import CancelToken, CancelledError
 from .widgets.filter_parameter_widget import FilterParameterWidget
 from processors import gmic, media, pdf_tools, parity
 from .preview_widget import ImagePreview
-from .theme import LIGHT_QSS, DARK_QSS
+from .theme import LIGHT_QSS, DARK_QSS, build_system_qss
 from .workbench import TaskQueueWidget, LogWidget, make_dock
 from .panels.shader_studio import ShaderStudioPanel
 from .panels.texture_studio import TextureStudioPanel
@@ -86,6 +87,8 @@ TOOL_ITEMS = [
     ("📐", "尺寸 / 体积缩放"),
     ("🧱", "拼贴 / 快速拼图"),
     ("🔐", "文件加密"),
+    ("🎞️", "高级胶片滤镜"),
+    ("🌀", "分形生成器"),
     ("❓", "关于"),
 ]
 
@@ -97,8 +100,8 @@ class MainWindow(QMainWindow):
         self._recent_files: list[str] = []
         self._settings = DesktopSettings()
         self._font_info = apply_fonts(QApplication.instance(), self._settings)
-        self._theme_mode = self._settings.value("theme/mode", "dark")
-        self._dark_mode = self._theme_mode == "dark"
+        self._theme_mode = self._settings.value("theme/mode", "system")
+        self._dark_mode = self._detect_system_dark()
 
         self.setWindowTitle("Image Toolbox - 图像工具箱")
         self.setMinimumSize(QSize(1180, 760))
@@ -113,14 +116,7 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._restore_window_state()
         self._select_tool(0)
-        self._preview_task = None
-        self._preview_worker_cancel = None
-        self._pending_preview_params = None
-        self._pending_preview_key = None
-        self._preview_timer = QTimer(self)
-        self._preview_timer.setSingleShot(True)
-        self._preview_timer.setInterval(250)
-        self._preview_timer.timeout.connect(self._do_single_filter_preview)
+        self._init_state()
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -165,6 +161,7 @@ class MainWindow(QMainWindow):
         self.preview = ImagePreview()
         self.preview.imageChanged.connect(self._on_image_changed)
         self.preview.mouseMoved.connect(self._on_mouse_moved)
+        self.preview.resetRequested.connect(self.reset_all)
 
         self.right_panel = QScrollArea()
         self.right_panel.setMinimumWidth(320)
@@ -225,7 +222,7 @@ class MainWindow(QMainWindow):
 
         self.action_undo = QAction("撤销", self)
         self.action_undo.setShortcut(QKeySequence.Undo)
-        self.action_undo.triggered.connect(self.preview.reset_to_original)
+        self.action_undo.triggered.connect(self.undo)
 
         self.action_focus_search = QAction("搜索工具", self)
         self.action_focus_search.setShortcut(QKeySequence("Ctrl+K"))
@@ -260,15 +257,174 @@ class MainWindow(QMainWindow):
         self._settings.setValue("theme/mode", self._theme_mode)
 
     def closeEvent(self, event) -> None:
+        self._cancel_active_preview()
+        if hasattr(self, '_active_apply_task') and self._active_apply_task is not None:
+            try:
+                self._active_apply_task.cancel()
+            except Exception:
+                pass
+            self._active_apply_task = None
+        if hasattr(self, 'task_queue'):
+            # Cancel queued work and let the private pool drain with a bounded
+            # wait; otherwise closing the window blocks on the longest filter.
+            self.task_queue.shutdown()
+        preview_cache_clear()
+        self._save_window_state()
+        super().closeEvent(event)
+
+    def _init_state(self) -> None:
+        self._history: list[tuple[np.ndarray, FilterChain | None, str]] = []
+        self._applied_image: np.ndarray | None = None
+        self._active_apply_task = None
+        self._preview_task = None
+        self._pending_preview_params: dict | None = None
+        self._pending_preview_key: str | None = None
+        self._preview_gen: int = 0
+        self._apply_gen: int = 0
+        self._committed_preview_gen: int = -1
+        self._is_dragging_sliders: bool = False
+        self._preview_was_fast: bool = False
+        self._apply_in_progress: bool = False
+        self._preview_src_cache_key = None
+        self._preview_src_cache = None
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(180)
+        self._preview_timer.timeout.connect(self._do_single_filter_preview)
+        self._update_button_states()
+
+    def _preview_source(self, base: np.ndarray, max_side: int) -> np.ndarray:
+        """Downscale `base` once per (identity, size) and reuse the result.
+
+        Re-running the full-resolution INTER_AREA reduction on every slider tick
+        cost ~60ms on the GUI thread for a 48MP image.
+        """
+        key = (id(base), base.shape, max_side, self.preview.generation)
+        if self._preview_src_cache_key == key and self._preview_src_cache is not None:
+            return self._preview_src_cache
+        src = downscale_preview(base, max_side)
+        self._preview_src_cache_key = key
+        self._preview_src_cache = src
+        return src
+
+    def _update_button_states(self) -> None:
+        has_image = self.preview.current_image() is not None
+        can_undo = len(self._history) > 0 and has_image
+        busy = self._preview_task is not None or self._apply_in_progress
+        if hasattr(self, '_btn_undo'):
+            self._btn_undo.setEnabled(can_undo and not busy)
+        if hasattr(self, '_btn_save'):
+            self._btn_save.setEnabled(has_image and not busy)
+        if hasattr(self, '_btn_reset'):
+            self._btn_reset.setEnabled(has_image and not busy)
+        self.action_undo.setEnabled(can_undo and not busy)
+        self.action_save.setEnabled(has_image and not busy)
+        self.action_save_as.setEnabled(has_image and not busy)
+
+    # Undo snapshots are full-resolution images, so cap the stack by total
+    # bytes as well as by count (30 x 24MP copies is ~2.1GB otherwise).
+    _HISTORY_MAX_ENTRIES = 30
+    _HISTORY_BUDGET_BYTES = 512 * 1024 * 1024
+
+    def _trim_history(self) -> None:
+        while len(self._history) > self._HISTORY_MAX_ENTRIES:
+            self._history.pop(0)
+        total = sum(img.nbytes for img, _chain, _reason in self._history)
+        while len(self._history) > 1 and total > self._HISTORY_BUDGET_BYTES:
+            img, _chain, _reason = self._history.pop(0)
+            total -= img.nbytes
+
+    def _push_history(self, reason: str = "操作") -> None:
+        """Snapshot the image currently on screen.
+
+        Call this *before* displaying a new result -- the snapshot is the state
+        Undo returns to. Pushing after `set_display` recorded the *new* image
+        instead, which silently made Undo a no-op.
+        """
+        current = self.preview.current_image()
+        if current is None:
+            return
+        chain_copy = None
+        if hasattr(self, '_filter_chain'):
+            chain_copy = self._filter_chain.clone()
+        self._history.append((current.copy(), chain_copy, reason))
+        self._trim_history()
+        self._update_button_states()
+
+    def _mark_applied(self) -> None:
+        current = self.preview.current_image()
+        self._applied_image = current.copy() if current is not None else None
+
+    def _commit_image(self, result, reason: str = "处理结果") -> None:
+        """Snapshot, display `result`, then adopt it as the applied base."""
+        self._cancel_active_preview()
+        if result is None:
+            return
+        self._push_history(reason)
+        self.preview.set_display(result)
+        self._mark_applied()
+        preview_cache_clear()
+
+    def undo(self) -> None:
+        if not self._history:
+            self.statusBar().showMessage("没有可撤销的操作", 2000)
+            return
+        prev_img, prev_chain, reason = self._history.pop()
+        self._cancel_active_preview()
+        self.preview.set_display(prev_img)
+        self._applied_image = prev_img.copy()
+        if prev_chain is not None and hasattr(self, '_filter_chain'):
+            self._filter_chain = prev_chain
+            if hasattr(self, '_refresh_chain_list'):
+                self._refresh_chain_list()
+        preview_cache_clear()
+        self.statusBar().showMessage(f"已撤销: {reason}", 2500)
+        self._update_button_states()
+
+    def reset_all(self) -> None:
+        if self.preview.original_image() is None:
+            return
+        self._cancel_active_preview()
+        self._history.clear()
+        self._applied_image = None
+        self.preview.set_image(self.preview.original_image())
+        if hasattr(self, '_filter_chain'):
+            self._filter_chain = FilterChain()
+            if hasattr(self, '_refresh_chain_list'):
+                self._refresh_chain_list()
+        if hasattr(self, 'filter_param_widget'):
+            self.filter_param_widget.reset_to_defaults()
+        self._pending_preview_params = None
+        self._pending_preview_key = None
+        self._preview_gen += 1
+        self._committed_preview_gen = -1
+        preview_cache_clear()
+        self.statusBar().showMessage("已重置到原始状态", 2500)
+        self._update_button_states()
+
+    def _cancel_active_preview(self) -> None:
+        self._preview_gen += 1
+        # Any state change that cancels a preview also invalidates an in-flight
+        # full-resolution apply result.
+        self._apply_gen += 1
         if self._preview_task is not None:
             try:
                 self._preview_task.cancel()
             except Exception:
                 pass
             self._preview_task = None
+        if self._preview_timer.isActive():
+            self._preview_timer.stop()
+        self._preview_was_fast = False
+
+    def _commit_preview_as_applied(self) -> None:
+        current = self.preview.current_image()
+        if current is not None:
+            self._applied_image = current.copy()
         preview_cache_clear()
-        self._save_window_state()
-        super().closeEvent(event)
+
+    def commit_processed_result(self, result, reason: str = "处理结果") -> None:
+        self._commit_image(result, reason)
 
     def _setup_menu(self) -> None:
         menubar = self.menuBar()
@@ -333,7 +489,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(backends,'后端状态')
         about=QWidget(); al=QVBoxLayout(about); al.addWidget(QLabel("Toolbox 桌面图像工具箱")); al.addWidget(QLabel("配置使用 Qt QSettings 持久化，不改变现有处理器 API。")); tabs.addTab(about,"关于")
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel|QDialogButtonBox.RestoreDefaults); layout.addWidget(buttons)
-        def defaults(): theme.setCurrentText("dark"); workers.setValue(4); output.clear(); recent.setChecked(True)
+        def defaults(): theme.setCurrentText("system"); workers.setValue(4); output.clear(); recent.setChecked(True)
         buttons.accepted.connect(dlg.accept); buttons.rejected.connect(dlg.reject); buttons.button(QDialogButtonBox.RestoreDefaults).clicked.connect(defaults)
         if dlg.exec()!=QDialog.Accepted: return
         self._settings.setValue('font/family',font_family.currentText()); self._settings.setValue('font/size',font_size.value()); self._settings.setValue('font/mono',mono_family.currentText()); self._font_info=apply_fonts(QApplication.instance(),self._settings)
@@ -351,20 +507,22 @@ class MainWindow(QMainWindow):
         btn_open.setToolTip("打开图片 (Ctrl+O)")
         tb.addWidget(btn_open)
 
-        btn_save = QPushButton("💾 保存")
-        btn_save.clicked.connect(self.save_file)
-        btn_save.setToolTip("保存 (Ctrl+S)")
-        tb.addWidget(btn_save)
+        self._btn_save = QPushButton("💾 保存")
+        self._btn_save.clicked.connect(self.save_file)
+        self._btn_save.setToolTip("保存 (Ctrl+S)")
+        tb.addWidget(self._btn_save)
 
         tb.addSeparator()
 
-        btn_undo = QPushButton("↩ 撤销")
-        btn_undo.clicked.connect(self.preview.reset_to_original)
-        tb.addWidget(btn_undo)
+        self._btn_undo = QPushButton("↩ 撤销")
+        self._btn_undo.clicked.connect(self.undo)
+        self._btn_undo.setToolTip("撤销上一步 (Ctrl+Z)")
+        tb.addWidget(self._btn_undo)
 
-        btn_reset = QPushButton("🔄 重置")
-        btn_reset.clicked.connect(lambda: self._select_tool(self.sidebar.currentRow()))
-        tb.addWidget(btn_reset)
+        self._btn_reset = QPushButton("🔄 重置")
+        self._btn_reset.clicked.connect(self.reset_all)
+        self._btn_reset.setToolTip("重置到打开时的原始状态 (ESC)")
+        tb.addWidget(self._btn_reset)
 
         tb.addSeparator()
 
@@ -389,19 +547,24 @@ class MainWindow(QMainWindow):
         btn_theme.clicked.connect(self._toggle_theme)
         tb.addWidget(btn_theme)
 
+    def _detect_system_dark(self) -> bool:
+        pal = QApplication.palette()
+        return pal.color(QPalette.Window).lightness() < 128
+
     def _apply_theme(self) -> None:
         if self._theme_mode == "system":
-            pal = QApplication.palette(); self._dark_mode = pal.color(QPalette.Window).lightness() < 128
+            self._dark_mode = self._detect_system_dark()
+            self.setStyleSheet(build_system_qss(QApplication.palette()))
         else:
             self._dark_mode = self._theme_mode == "dark"
-        self.setStyleSheet(DARK_QSS if self._dark_mode else LIGHT_QSS)
+            self.setStyleSheet(DARK_QSS if self._dark_mode else LIGHT_QSS)
         self.setProperty("darkMode", self._dark_mode)
         self.style().unpolish(self)
         self.style().polish(self)
 
     def _toggle_theme(self) -> None:
-        modes = ["dark", "light", "system"]
-        self._theme_mode = modes[(modes.index(self._theme_mode) + 1) % len(modes)] if self._theme_mode in modes else "dark"
+        modes = ["system", "dark", "light"]
+        self._theme_mode = modes[(modes.index(self._theme_mode) + 1) % len(modes)] if self._theme_mode in modes else "system"
         self._apply_theme(); self._settings.setValue("theme/mode", self._theme_mode)
         self.statusBar().showMessage(f"主题: {self._theme_mode}", 2000)
 
@@ -483,6 +646,8 @@ class MainWindow(QMainWindow):
             self._build_resize_ex_panel,
             self._build_collage_ex_panel,
             self._build_crypto2_panel,
+            self._build_advanced_filters_panel,
+            self._build_fractal_panel,
             self._build_about_panel,
         ]
         if 0 <= tool_index < len(builders):
@@ -523,7 +688,7 @@ class MainWindow(QMainWindow):
         self.right_layout.addWidget(label)
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("color: #e5e7eb; max-height: 1px;")
+        line.setObjectName("sectionDivider")
         self.right_layout.addWidget(line)
 
     def _add_stretch(self) -> None:
@@ -533,27 +698,39 @@ class MainWindow(QMainWindow):
         self._clear_right()
         self._add_section("✨ 基础调整")
 
-        groups = [
+        self._adjust_specs = [
             ("亮度", img_core.brightness, [-1.0, 1.0, 0.0, 0.05]),
             ("对比度", img_core.contrast, [-1.0, 1.0, 0.0, 0.05]),
             ("饱和度", img_core.saturation, [-1.0, 1.0, 0.0, 0.05]),
             ("伽马", img_core.gamma, [0.2, 5.0, 1.0, 0.05]),
-            ("曝光 (stops)", img_core.exposure, [-3.0, 3.0, 0.0, 0.1]),
-            ("色相 (度)", img_core.hue_shift, [-180, 180, 0, 1]),
+            ("曝光", img_core.exposure, [-3.0, 3.0, 0.0, 0.1]),
+            ("色相", img_core.hue_shift, [-180, 180, 0, 1]),
             ("自然饱和度", img_core.vibrance, [-1.0, 1.0, 0.0, 0.05]),
             ("高光", lambda img, v: img_core.highlights_shadows(img, v, 0), [-100, 100, 0, 1]),
             ("阴影", lambda img, v: img_core.highlights_shadows(img, 0, v), [-100, 100, 0, 1]),
         ]
 
-        for name, func, (lo, hi, default, step) in groups:
-            self._add_slider_row(name, func, lo, hi, default, step)
+        self._adjust_controls: list[dict] = []
+        for idx, (label, func, (lo, hi, default, step)) in enumerate(self._adjust_specs):
+            entry = self._add_adjust_row(label, func, lo, hi, default, step, idx)
+            self._adjust_controls.append(entry)
 
-        btn_reset = QPushButton("↩ 撤销所有调整")
-        btn_reset.clicked.connect(self.preview.reset_to_original)
-        self.right_layout.addWidget(btn_reset)
+        btn_row = QHBoxLayout()
+        btn_apply_adjust = QPushButton("✓ 应用调整")
+        btn_apply_adjust.clicked.connect(self._apply_adjust_full_res)
+        btn_row.addWidget(btn_apply_adjust)
+        btn_reset_adjust = QPushButton("↺ 默认值")
+        btn_reset_adjust.setObjectName("secondary")
+        btn_reset_adjust.clicked.connect(self._reset_adjust_sliders)
+        btn_row.addWidget(btn_reset_adjust)
+        btn_reset = QPushButton("🔄 重置全部")
+        btn_reset.setObjectName("secondary")
+        btn_reset.clicked.connect(self.reset_all)
+        btn_row.addWidget(btn_reset)
+        self.right_layout.addLayout(btn_row)
         self._add_stretch()
 
-    def _add_slider_row(self, label: str, func, lo, hi, default, step) -> None:
+    def _add_adjust_row(self, label: str, func, lo, hi, default, step, idx: int) -> dict:
         row = QHBoxLayout()
         row.setSpacing(8)
         lbl = QLabel(label)
@@ -580,39 +757,165 @@ class MainWindow(QMainWindow):
             spin.setDecimals(2)
         row.addWidget(spin)
 
-        def on_slider(v):
-            if isinstance(step, float):
-                val = v * step
+        ctrl = {"slider": slider, "spin": spin, "func": func, "lo": lo, "hi": hi, "default": default, "step": step}
+
+        def on_slider(v, _idx=idx):
+            s = self._adjust_controls[_idx]
+            if isinstance(s["step"], float):
+                val = v * s["step"]
             else:
                 val = v
-            spin.blockSignals(True)
-            spin.setValue(float(val))
-            spin.blockSignals(False)
-            self._apply_instant(func, val)
+            s["spin"].blockSignals(True)
+            s["spin"].setValue(float(val))
+            s["spin"].blockSignals(False)
+            self._adjust_combined_preview()
 
-        def on_spin(v):
-            if self.preview.current_image() is None:
-                return
-            slider.blockSignals(True)
-            if isinstance(step, float):
-                slider.setValue(int(v / step))
+        def on_spin(v, _idx=idx):
+            s = self._adjust_controls[_idx]
+            s["slider"].blockSignals(True)
+            if isinstance(s["step"], float):
+                s["slider"].setValue(int(v / s["step"]))
             else:
-                slider.setValue(int(v))
-            slider.blockSignals(False)
-            self._apply_instant(func, v)
+                s["slider"].setValue(int(v))
+            s["slider"].blockSignals(False)
+            self._adjust_combined_preview()
 
         slider.valueChanged.connect(on_slider)
         spin.valueChanged.connect(on_spin)
         self.right_layout.addLayout(row)
+        return ctrl
 
-    def _apply_instant(self, func, value) -> None:
-        if self.preview._original is None:
-            return
+    def _collect_adjust_values(self) -> list:
+        vals = []
+        for c in self._adjust_controls:
+            v = c["spin"].value()
+            if isinstance(c["step"], float):
+                pass
+            else:
+                v = int(v)
+            vals.append(v)
+        return vals
+
+    @staticmethod
+    def _adjust_changed(control: dict, value) -> bool:
+        """True when `value` differs from the slider's default (a no-op step)."""
         try:
-            result = func(self.preview._original.copy(), value)
-            self.preview.update_current(result)
-        except Exception:
-            pass
+            return abs(float(value) - float(control["default"])) > 1e-6
+        except (TypeError, ValueError):
+            return value != control["default"]
+
+    def _apply_adjust_chain(self, src, values: list, cancel_token=None):
+        cur = None
+        for c, v in zip(self._adjust_controls, values):
+            if cancel_token is not None and cancel_token.is_cancelled():
+                break
+            if not self._adjust_changed(c, v):
+                # Skipping no-op steps avoids a pointless full-image float pass
+                # (and the +/-1 LSB HSV round-trip of saturation/vibrance).
+                continue
+            cur = c["func"](src.copy() if cur is None else cur, v)
+        return src.copy() if cur is None else cur
+
+    def _adjust_preview_busy(self) -> bool:
+        """Sliders are not disabled during an apply, so refuse to start a
+        preview that would discard the pending full-resolution result."""
+        return self._apply_in_progress
+
+    def _adjust_combined_preview(self) -> None:
+        base = self._applied_image if self._applied_image is not None else self.preview.original_image()
+        if base is None or self._adjust_preview_busy():
+            return
+        self._cancel_active_preview()
+        self._is_dragging_sliders = True
+        values = self._collect_adjust_values()
+        max_side = 384
+        src = self._preview_source(base, max_side)
+        gen = self._preview_gen + 1
+        self._preview_gen = gen
+
+        def _work(ct):
+            return self._apply_adjust_chain(src, values, cancel_token=ct)
+
+        worker = lambda _p, _ct: _work(_ct)
+        task = self.task_queue.enqueue(f"调整预览", worker)
+        self._preview_task = task
+        task.signals.finished.connect(lambda r, g=gen: self._on_adjust_preview_done(r, g))
+        task.signals.failed.connect(lambda e: self._on_single_filter_preview_failed(e))
+        task.signals.cancelled.connect(lambda: self._on_single_filter_preview_failed("取消"))
+
+    def _on_adjust_preview_done(self, result, gen: int) -> None:
+        if gen != self._preview_gen:
+            return
+        self._preview_task = None
+        self._is_dragging_sliders = False
+        if result is not None:
+            self.preview.set_display(result)
+        self._update_button_states()
+
+    def _reset_adjust_sliders(self) -> None:
+        for c in self._adjust_controls:
+            c["spin"].blockSignals(True)
+            c["spin"].setValue(c["default"])
+            c["spin"].blockSignals(False)
+            c["slider"].blockSignals(True)
+            if isinstance(c["step"], float):
+                c["slider"].setValue(int(c["default"] / c["step"]))
+            else:
+                c["slider"].setValue(int(c["default"]))
+            c["slider"].blockSignals(False)
+        self._adjust_combined_preview()
+
+    def _apply_adjust_full_res(self) -> None:
+        base = self._applied_image if self._applied_image is not None else self.preview.original_image()
+        if base is None:
+            return
+        if self._apply_in_progress:
+            self.statusBar().showMessage("上一次调整仍在应用中...", 2000)
+            return
+        self._cancel_active_preview()
+        values = self._collect_adjust_values()
+
+        if not any(self._adjust_changed(c, v) for c, v in zip(self._adjust_controls, values)):
+            self.statusBar().showMessage("所有调整参数为默认值，无需应用", 2000)
+            return
+
+        # Full-resolution adjustment over up to 9 stages used to run inline on
+        # the GUI thread (~2.8s frozen for a 24MP image); run it on the queue.
+        gen = self._apply_gen
+        self._apply_in_progress = True
+        self._update_button_states()
+
+        def _work(_progress, ct):
+            return self._apply_adjust_chain(base, values, cancel_token=ct)
+
+        task = self.task_queue.enqueue("调整参数应用", _work)
+        self._active_apply_task = task
+        task.signals.finished.connect(lambda r, g=gen: self._on_adjust_full_done(r, g))
+        task.signals.failed.connect(self._on_adjust_full_failed)
+        task.signals.cancelled.connect(lambda: self._on_adjust_full_cancelled())
+        if hasattr(self, 'task_dock'):
+            self.task_dock.show()
+        self.statusBar().showMessage("调整应用中...", 0)
+
+    def _on_adjust_full_done(self, result, gen: int | None = None) -> None:
+        self._active_apply_task = None
+        self._apply_in_progress = False
+        if result is not None and (gen is None or gen == self._apply_gen):
+            self._commit_image(result, "调整参数应用")
+            self.statusBar().showMessage("✓ 调整已应用", 2500)
+        self._update_button_states()
+
+    def _on_adjust_full_failed(self, err_msg: str) -> None:
+        self._active_apply_task = None
+        self._apply_in_progress = False
+        self._update_button_states()
+        QMessageBox.warning(self, "调整失败", err_msg)
+
+    def _on_adjust_full_cancelled(self) -> None:
+        self._active_apply_task = None
+        self._apply_in_progress = False
+        self._update_button_states()
+        self.statusBar().showMessage("调整已取消", 2500)
 
     def _build_filter_panel(self) -> None:
         self._clear_right()
@@ -666,7 +969,7 @@ class MainWindow(QMainWindow):
 
         btn_reset = QPushButton("↩ 撤销")
         btn_reset.setObjectName("secondary")
-        btn_reset.clicked.connect(self.preview.reset_to_original)
+        btn_reset.clicked.connect(self.undo)
         btn_row.addWidget(btn_reset)
         self.right_layout.addLayout(btn_row)
 
@@ -773,7 +1076,7 @@ class MainWindow(QMainWindow):
         self._refresh_chain_list()
 
     def _on_apply_chain(self) -> None:
-        img = self.preview._original
+        img = self.preview.original_image()
         if img is None:
             self._show_info("请先打开一张图片")
             return
@@ -784,29 +1087,37 @@ class MainWindow(QMainWindow):
         if not ok:
             QMessageBox.warning(self, "参数错误", "\n".join(errs))
             return
+        self._cancel_active_preview()
+        self._apply_in_progress = True
+        self._update_button_states()
         worker = make_filter_chain_worker(img.copy(), self._filter_chain)
         task = self.task_queue.enqueue(f"滤镜链 · {len(self._filter_chain)} 步骤", worker)
-        self._preview_task = task
+        self._active_apply_task = task
         task.signals.finished.connect(self._on_chain_apply_done)
         task.signals.failed.connect(self._on_chain_apply_failed)
         task.signals.cancelled.connect(self._on_chain_apply_cancelled)
         self.task_dock.show()
+        self.statusBar().showMessage("滤镜链应用中...", 0)
 
     def _on_chain_apply_done(self, result) -> None:
-        if self._preview_task is not None and self.sender() is not None:
-            self._preview_task = None
+        self._active_apply_task = None
+        self._apply_in_progress = False
         if result is not None:
-            self.preview.update_current(result)
-            self.statusBar().showMessage("滤镜链应用完成", 3000)
+            self._commit_image(result, "滤镜链应用")
+            self.statusBar().showMessage("✓ 滤镜链应用完成", 3000)
+        else:
+            self._update_button_states()
 
     def _on_chain_apply_failed(self, err_msg: str) -> None:
-        if self._preview_task is not None:
-            self._preview_task = None
+        self._active_apply_task = None
+        self._apply_in_progress = False
+        self._update_button_states()
         QMessageBox.warning(self, "滤镜链失败", err_msg)
 
     def _on_chain_apply_cancelled(self) -> None:
-        if self._preview_task is not None:
-            self._preview_task = None
+        self._active_apply_task = None
+        self._apply_in_progress = False
+        self._update_button_states()
         self.statusBar().showMessage("滤镜链已取消", 3000)
 
     def _on_clear_chain(self) -> None:
@@ -914,64 +1225,96 @@ class MainWindow(QMainWindow):
         self.filter_param_widget.set_filter_def(defn)
 
     def _on_filter_params_changed(self, params: dict) -> None:
-        if self.preview._original is None:
+        if self.preview.original_image() is None:
             return
         defn = self.filter_param_widget.filter_def()
         if defn is None or not defn.preview_supported:
             return
+        self._is_dragging_sliders = True
+        self._cancel_active_preview()
         self._pending_preview_params = params
         self._pending_preview_key = defn.key
         self._preview_timer.start()
 
     def _do_single_filter_preview(self) -> None:
-        img = self.preview._original
-        if img is None or self._pending_preview_key is None:
+        orig = self.preview.original_image()
+        if orig is None or self._pending_preview_key is None:
+            self._is_dragging_sliders = False
+            return
+        if self._adjust_preview_busy():
             return
         defn = self.filter_param_widget.filter_def()
         if defn is None or defn.key != self._pending_preview_key:
+            self._is_dragging_sliders = False
             return
         params = self._pending_preview_params or {}
         preview_chain = FilterChain()
         try:
             preview_chain.add(defn.key, params=params if params else None)
         except Exception:
+            self._is_dragging_sliders = False
             return
-        cache_key = preview_cache_key(img, preview_chain)
+
+        gen = self._preview_gen + 1
+        self._preview_gen = gen
+
+        # Drag tier is small and fast; once the drag settles one more pass runs
+        # at the full preview size (previously the 768 branch was unreachable and
+        # every preview was stuck at 384px).
+        self._preview_was_fast = self._is_dragging_sliders
+        max_side = 384 if self._preview_was_fast else 768
+        src = self._preview_source(orig, max_side)
+
+        cache_key = preview_cache_key(src, preview_chain, max_side=max_side, image_generation=self.preview.generation)
         cached = preview_cache_get(cache_key)
         if cached is not None:
-            self.preview.update_current(cached)
+            preview_cache_set(cache_key, cached)
+            self.preview.set_display(cached)
+            self._committed_preview_gen = gen
+            self.statusBar().showMessage("预览 (缓存)", 1000)
+            if not self._maybe_upgrade_preview():
+                self._is_dragging_sliders = False
+                self._update_button_states()
             return
-        if self._preview_task is not None:
-            try:
-                self._preview_task.cancel()
-            except Exception:
-                pass
-            self._preview_task = None
-        worker = make_filter_chain_worker(img.copy(), preview_chain)
+
+        self._preview_task = None
+        worker = make_filter_chain_worker(src.copy(), preview_chain)
         task = self.task_queue.enqueue(f"参数预览 · {defn.display_name}", worker)
         self._preview_task = task
-        task.signals.finished.connect(self._on_single_filter_preview_done)
+        task.signals.finished.connect(lambda r, g=gen, ck=cache_key, orig_hw=(orig.shape[0], orig.shape[1]): self._on_single_filter_preview_done(r, g, ck, orig_hw))
         task.signals.failed.connect(self._on_single_filter_preview_failed)
+        task.signals.cancelled.connect(self._on_single_filter_preview_failed)
+        self.statusBar().showMessage(f"预览中... ({max_side}px)", 0)
 
-    def _on_single_filter_preview_done(self, result) -> None:
-        if self._preview_task is not None:
-            self._preview_task = None
-        if result is not None and self.preview._original is not None:
-            defn = self.filter_param_widget.filter_def()
-            if defn is not None:
-                preview_chain = FilterChain()
-                try:
-                    params = self._pending_preview_params or {}
-                    preview_chain.add(defn.key, params=params if params else None)
-                    cache_key = preview_cache_key(self.preview._original, preview_chain)
-                    preview_cache_set(cache_key, result)
-                except Exception:
-                    pass
-            self.preview.update_current(result)
+    def _maybe_upgrade_preview(self) -> bool:
+        """After a drag-tier render, queue one full-quality re-render."""
+        if not self._preview_was_fast:
+            return False
+        self._preview_was_fast = False
+        self._is_dragging_sliders = False
+        self._preview_timer.start()
+        return True
 
-    def _on_single_filter_preview_failed(self, err_msg: str) -> None:
-        if self._preview_task is not None:
-            self._preview_task = None
+    def _on_single_filter_preview_done(self, result, gen: int, cache_key: str, orig_hw: tuple[int, int]) -> None:
+        if gen != self._preview_gen:
+            return
+        self._preview_task = None
+        self._committed_preview_gen = gen
+        if result is not None:
+            preview_cache_set(cache_key, result)
+            self.preview.set_display(result)
+            self.statusBar().showMessage("预览就绪", 1200)
+        if not self._maybe_upgrade_preview():
+            self._is_dragging_sliders = False
+            self._update_button_states()
+
+    def _on_single_filter_preview_failed(self, err_msg: str = "") -> None:
+        self._preview_task = None
+        self._is_dragging_sliders = False
+        self._preview_was_fast = False
+        if err_msg and "取消" not in err_msg:
+            self.statusBar().showMessage(f"预览失败: {err_msg[:40]}", 2000)
+        self._update_button_states()
 
     def _on_filter_apply(self, item: QListWidgetItem) -> None:
         key = item.data(Qt.UserRole)
@@ -983,23 +1326,24 @@ class MainWindow(QMainWindow):
             self._on_filter_apply(items[0])
 
     def _apply_filter_by_key(self, key: str) -> None:
-        img = self.preview._original
-        if img is None:
+        orig = self.preview.original_image()
+        if orig is None:
             self._show_info("请先打开一张图片")
             return
         defn = FilterDefRegistry.instance().get(key)
+        self._cancel_active_preview()
         if defn is not None:
             try:
                 params = self.filter_param_widget.current_params() if self.filter_param_widget.filter_def() and self.filter_param_widget.filter_def().key == key else None
-                result = defn.apply(img.copy(), params)
-                self.preview.update_current(result)
+                result = defn.apply(orig.copy(), params)
+                self._commit_image(result, f"应用滤镜: {defn.display_name}")
                 return
             except Exception as e:
                 QMessageBox.warning(self, "滤镜失败", f"{defn.display_name}: {e}")
                 return
         try:
-            result = apply_filter(key, img.copy())
-            self.preview.update_current(result)
+            result = apply_filter(key, orig.copy())
+            self._commit_image(result, f"应用滤镜: {key}")
         except Exception as e:
             QMessageBox.warning(self, "滤镜失败", f"{key}: {e}")
 
@@ -1308,22 +1652,24 @@ class MainWindow(QMainWindow):
         self._add_stretch()
 
     def _apply_watermark(self) -> None:
-        img = self.preview._original
+        img = self.preview.original_image()
         if img is None:
             self._show_info("请先打开图片")
             return
         from processors.filters import add_text_watermark
         from processors.utils import ensure_rgba, u8
+        self._cancel_active_preview()
         result = add_text_watermark(
-            img, self.wm_text.text(), self.wm_x.value(), self.wm_y.value(),
+            img.copy(), self.wm_text.text(), self.wm_x.value(), self.wm_y.value(),
             self.wm_fs.value(), (255, 255, 255), self.wm_alpha.value()
         )
-        self.preview.update_current(result)
+        self._commit_image(result, "添加文字水印")
 
     def _apply_tiled_watermark(self) -> None:
-        img = self.preview._original
+        img = self.preview.original_image()
         if img is None:
             return
+        self._cancel_active_preview()
         from processors.filters import add_text_watermark
         result = img.copy()
         rows, cols = 4, 5
@@ -1333,7 +1679,7 @@ class MainWindow(QMainWindow):
                 y = (i + 0.5) / rows
                 result = add_text_watermark(result, self.wm_text.text(), x, y,
                                             self.wm_fs.value(), (255, 255, 255), self.wm_alpha.value())
-        self.preview.update_current(result)
+        self._commit_image(result, "平铺水印")
 
     def _build_color_panel(self) -> None:
         self._clear_right()
@@ -1345,32 +1691,32 @@ class MainWindow(QMainWindow):
 
         self.palette_display = QWidget()
         self.palette_display.setFixedHeight(60)
-        self.palette_display.setStyleSheet("background: white; border: 1px solid #e5e7eb; border-radius: 6px;")
+        self.palette_display.setObjectName("palettePanel")
         self.right_layout.addWidget(self.palette_display)
 
         btn_inv = QPushButton("🔄 反色")
         btn_inv.setObjectName("secondary")
-        btn_inv.clicked.connect(lambda: self.preview.update_current(img_core.invert(self.preview.current_image())))
+        btn_inv.clicked.connect(lambda: self._commit_image(img_core.invert(self.preview.current_image()), "反色"))
         self.right_layout.addWidget(btn_inv)
 
         btn_gray = QPushButton("⚫ 灰度")
         btn_gray.setObjectName("secondary")
-        btn_gray.clicked.connect(lambda: self.preview.update_current(img_core.grayscale(self.preview.current_image())))
+        btn_gray.clicked.connect(lambda: self._commit_image(img_core.grayscale(self.preview.current_image()), "灰度"))
         self.right_layout.addWidget(btn_gray)
 
         btn_heq = QPushButton("📊 直方图均衡")
         btn_heq.setObjectName("secondary")
-        btn_heq.clicked.connect(lambda: self.preview.update_current(img_core.histogram_equalize(self.preview.current_image())))
+        btn_heq.clicked.connect(lambda: self._commit_image(img_core.histogram_equalize(self.preview.current_image()), "直方图均衡"))
         self.right_layout.addWidget(btn_heq)
 
         btn_clahe = QPushButton("🔧 CLAHE")
         btn_clahe.setObjectName("secondary")
-        btn_clahe.clicked.connect(lambda: self.preview.update_current(img_core.clahe(self.preview.current_image())))
+        btn_clahe.clicked.connect(lambda: self._commit_image(img_core.clahe(self.preview.current_image()), "CLAHE"))
         self.right_layout.addWidget(btn_clahe)
 
         btn_vignette = QPushButton("⭕ 暗角")
         btn_vignette.setObjectName("secondary")
-        btn_vignette.clicked.connect(lambda: self.preview.update_current(img_core.vignette(self.preview.current_image(), 0.4)))
+        btn_vignette.clicked.connect(lambda: self._commit_image(img_core.vignette(self.preview.current_image(), 0.4), "暗角"))
         self.right_layout.addWidget(btn_vignette)
 
         self._add_stretch()
@@ -1482,24 +1828,27 @@ class MainWindow(QMainWindow):
         img = self.preview.current_image()
         if img is None:
             return
+        self._cancel_active_preview()
         result = img_core.crop(img, self.crop_x.value(), self.crop_y.value(),
                                self.crop_w.value(), self.crop_h.value())
-        self.preview.update_current(result)
+        self._commit_image(result, "裁剪")
 
     def _do_center_crop(self) -> None:
         img = self.preview.current_image()
         if img is None:
             return
+        self._cancel_active_preview()
         result = img_core.center_crop(img, self.crop_w.value(), self.crop_h.value())
-        self.preview.update_current(result)
+        self._commit_image(result, "中心裁剪")
 
     def _do_aspect_crop(self) -> None:
         img = self.preview.current_image()
         if img is None:
             return
+        self._cancel_active_preview()
         ratio = self.crop_w.value() / self.crop_h.value() if self.crop_h.value() else 1
         result = img_core.aspect_crop(img, ratio)
-        self.preview.update_current(result)
+        self._commit_image(result, "比例裁剪")
 
     def _build_transform_panel(self) -> None:
         self._clear_right()
@@ -1510,22 +1859,22 @@ class MainWindow(QMainWindow):
         self.rot_angle = QDoubleSpinBox(); self.rot_angle.setRange(-180, 180); self.rot_angle.setSingleStep(1)
         form_rot.addRow("角度:", self.rot_angle)
         btn_rot = QPushButton("应用旋转")
-        btn_rot.clicked.connect(lambda: self.preview.update_current(
-            img_core.rotate(self.preview.current_image(), self.rot_angle.value())))
+        btn_rot.clicked.connect(lambda: self._commit_image(
+            img_core.rotate(self.preview.current_image(), self.rot_angle.value()), "旋转"))
         form_rot.addRow(btn_rot)
         self.right_layout.addWidget(gb_rot)
 
         row = QHBoxLayout()
-        btn_l = QPushButton("↺ 90° 左"); btn_l.clicked.connect(lambda: self.preview.update_current(img_core.rotate(self.preview.current_image(), -90)))
-        btn_r = QPushButton("↻ 90° 右"); btn_r.clicked.connect(lambda: self.preview.update_current(img_core.rotate(self.preview.current_image(), 90)))
-        btn_180 = QPushButton("180°"); btn_180.clicked.connect(lambda: self.preview.update_current(img_core.rotate(self.preview.current_image(), 180)))
+        btn_l = QPushButton("↺ 90° 左"); btn_l.clicked.connect(lambda: self._commit_image(img_core.rotate(self.preview.current_image(), -90), "左旋转90°"))
+        btn_r = QPushButton("↻ 90° 右"); btn_r.clicked.connect(lambda: self._commit_image(img_core.rotate(self.preview.current_image(), 90), "右旋转90°"))
+        btn_180 = QPushButton("180°"); btn_180.clicked.connect(lambda: self._commit_image(img_core.rotate(self.preview.current_image(), 180), "旋转180°"))
         row.addWidget(btn_l); row.addWidget(btn_r); row.addWidget(btn_180)
         self.right_layout.addLayout(row)
 
         gb_flip = QGroupBox("翻转")
         r2 = QHBoxLayout()
-        btn_hf = QPushButton("⬅➡ 水平"); btn_hf.clicked.connect(lambda: self.preview.update_current(img_core.flip_h(self.preview.current_image())))
-        btn_vf = QPushButton("⬆⬇ 垂直"); btn_vf.clicked.connect(lambda: self.preview.update_current(img_core.flip_v(self.preview.current_image())))
+        btn_hf = QPushButton("⬅➡ 水平"); btn_hf.clicked.connect(lambda: self._commit_image(img_core.flip_h(self.preview.current_image()), "水平翻转"))
+        btn_vf = QPushButton("⬆⬇ 垂直"); btn_vf.clicked.connect(lambda: self._commit_image(img_core.flip_v(self.preview.current_image()), "垂直翻转"))
         r2.addWidget(btn_hf); r2.addWidget(btn_vf)
         gb_flip.setLayout(r2)
         self.right_layout.addWidget(gb_flip)
@@ -1540,9 +1889,9 @@ class MainWindow(QMainWindow):
         interp_row.addWidget(self.res_interp, 1)
         form_res.addRow(interp_row)
         btn_res = QPushButton("应用缩放")
-        btn_res.clicked.connect(lambda: self.preview.update_current(
+        btn_res.clicked.connect(lambda: self._commit_image(
             img_core.scale(self.preview.current_image(), self.res_scale.value(),
-                           self.res_interp.currentText())))
+                           self.res_interp.currentText()), "缩放"))
         form_res.addRow(btn_res)
         self.right_layout.addWidget(gb_res)
 
@@ -1585,7 +1934,7 @@ class MainWindow(QMainWindow):
                 dst = str(Path(td) / "output.png")
                 save_image(img, src)
                 gmic.apply(src, dst, self.gmic_command.text())
-                self.preview.update_current(load_image(dst))
+                self._commit_image(load_image(dst), "G'MIC 滤镜")
             self.statusBar().showMessage("G'MIC 处理完成", 3000)
         except Exception as e:
             QMessageBox.warning(self, "G'MIC 失败", str(e))
@@ -1804,14 +2153,14 @@ class MainWindow(QMainWindow):
         mask = cv2.threshold(gray, 250, 255, cv2.THRESH_BINARY_INV)[1]
         box = cv2.boundingRect(mask)
         if box[2] > 0 and box[3] > 0:
-            self.preview.update_current(img_core.crop(img, *box))
+            self._commit_image(img_core.crop(img, *box), "自动裁剪")
 
     def _add_border(self) -> None:
         img = self.preview.current_image()
         if img is None: return
         px, ok = QInputDialog.getInt(self, "边框", "像素:", 32, 1, 2000)
         if not ok: return
-        self.preview.update_current(img_core.border(img, px, px, px, px, (0, 0, 0)))
+        self._commit_image(img_core.border(img, px, px, px, px, (0, 0, 0)), "添加边框")
 
     def _show_image_info(self) -> None:
         img = self.preview.current_image()
@@ -1866,13 +2215,9 @@ class MainWindow(QMainWindow):
             h, w = img.shape[:2]
             self.status_info.setText(f"{w}×{h}  |  {self._current_file or '未保存'}")
         self.status_zoom.setText(f"{int(self.preview.scale_value() * 100)}%")
-        if self._preview_task is not None:
-            try:
-                self._preview_task.cancel()
-            except Exception:
-                pass
-            self._preview_task = None
+        self._cancel_active_preview()
         preview_cache_clear()
+        self._update_button_states()
 
     def _on_mouse_moved(self, x: int, y: int) -> None:
         self.status_pos.setText(f"坐标: ({x}, {y})")
@@ -1886,42 +2231,71 @@ class MainWindow(QMainWindow):
 
     def load_file(self, path: str) -> None:
         try:
+            self._cancel_active_preview()
             arr = load_image(path)
             self.preview.set_image(arr)
             self._current_file = path
+            self._applied_image = arr.copy()
+            self._history.clear()
+            self._pending_preview_params = None
+            self._pending_preview_key = None
+            if hasattr(self, '_filter_chain'):
+                self._filter_chain = FilterChain()
+                if hasattr(self, '_refresh_chain_list'):
+                    self._refresh_chain_list()
+            preview_cache_clear()
             self.setWindowTitle(f"Image Toolbox - {Path(path).name}")
             if path not in self._recent_files:
                 self._recent_files.insert(0, path)
                 self._recent_files = self._recent_files[:10]
+            self._update_button_states()
+            self.statusBar().showMessage(f"已打开: {path}", 3000)
         except Exception as e:
             QMessageBox.critical(self, "打开失败", f"无法打开 {path}:\n{e}")
 
+    def _image_to_save(self):
+        """Image for saving; `or` on ndarray raised "truth value is ambiguous"."""
+        if self._applied_image is not None:
+            return self._applied_image
+        return self.preview.current_image()
+
     def save_file(self) -> None:
-        if self.preview.current_image() is None:
+        img_to_save = self._image_to_save()
+        if img_to_save is None:
             self._show_info("没有图片可保存")
+            return
+        if self._preview_task is not None or self._apply_in_progress:
+            self.statusBar().showMessage("正在处理中，请稍候...", 2000)
             return
         if self._current_file:
             try:
-                save_image(self.preview.current_image(), self._current_file)
-                self.statusBar().showMessage(f"已保存: {self._current_file}", 3000)
+                self.statusBar().showMessage(f"保存中...", 0)
+                QApplication.processEvents()
+                save_image(img_to_save, self._current_file)
+                self.statusBar().showMessage(f"✓ 已保存: {self._current_file}", 3000)
             except Exception as e:
+                self.statusBar().clearMessage()
                 QMessageBox.critical(self, "保存失败", str(e))
         else:
             self.save_file_as()
 
     def save_file_as(self) -> None:
-        if self.preview.current_image() is None:
+        img_to_save = self._image_to_save()
+        if img_to_save is None:
             self._show_info("没有图片可保存")
             return
         path, _ = QFileDialog.getSaveFileName(self, "另存为", self._current_file or "output.png",
             "PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;TIFF (*.tiff);;BMP (*.bmp)")
         if path:
             try:
-                save_image(self.preview.current_image(), path)
+                self.statusBar().showMessage(f"保存中...", 0)
+                QApplication.processEvents()
+                save_image(img_to_save, path)
                 self._current_file = path
                 self.setWindowTitle(f"Image Toolbox - {Path(path).name}")
-                self.statusBar().showMessage(f"已保存: {path}", 3000)
+                self.statusBar().showMessage(f"✓ 已保存: {path}", 3000)
             except Exception as e:
+                self.statusBar().clearMessage()
                 QMessageBox.critical(self, "保存失败", str(e))
 
     def _show_info(self, msg: str) -> None:
@@ -1964,7 +2338,7 @@ class MainWindow(QMainWindow):
             result = ai.remove_background(img, model=self.rmbg_model.currentData(),
                                           alpha_matting=self.rmbg_alpha_matting.isChecked(),
                                           backend=selected_backend())
-            self.preview.set_image(result)
+            self.commit_processed_result(result, reason="处理结果")
             self.statusBar().showMessage("抠图完成", 3000)
         except Exception as e:
             self.statusBar().clearMessage()
@@ -1984,7 +2358,7 @@ class MainWindow(QMainWindow):
                                         alpha_matting=self.rmbg_alpha_matting.isChecked(),
                                         backend=selected_backend())
             result = ai.composite_on_bg(rgba, (color.red(), color.green(), color.blue()))
-            self.preview.set_image(result)
+            self.commit_processed_result(result, reason="处理结果")
             self.statusBar().showMessage("换背景完成", 3000)
         except Exception as e:
             self.statusBar().clearMessage()
@@ -2001,7 +2375,7 @@ class MainWindow(QMainWindow):
         try:
             result = ai.portrait_bokeh(img, model=self.rmbg_model.currentData(),
                                        blur_strength=blur)
-            self.preview.set_image(result)
+            self.commit_processed_result(result, reason="处理结果")
             self.statusBar().showMessage("完成", 3000)
         except Exception as e:
             self.statusBar().clearMessage()
@@ -2034,7 +2408,7 @@ class MainWindow(QMainWindow):
         btn.clicked.connect(self._ai_upscale)
         self.right_layout.addWidget(btn)
         tip = QLabel("💡 Lanczos 快速且效果好；AI 模型更精细但需下载权重")
-        tip.setWordWrap(True); tip.setStyleSheet("color: gray;")
+        tip.setWordWrap(True); tip.setObjectName("hintTip")
         self.right_layout.addWidget(tip)
 
     def _ai_upscale(self) -> None:
@@ -2055,7 +2429,7 @@ class MainWindow(QMainWindow):
                     raise RuntimeError("该模型已经纳入模型库，但当前 Upscayl 调用链正在整理不同倍率的模型参数，暂不能直接用于此处。")
                 result = ai.upscale_realesrgan(img, factor, model=model)
             else: result = ai.upscale_lanczos(img, factor)
-            self.preview.set_image(result)
+            self.commit_processed_result(result, reason="处理结果")
             h, w = result.shape[:2]
             self.statusBar().showMessage(f"完成: {w}x{h}", 3000)
         except Exception as e:
@@ -2091,7 +2465,7 @@ class MainWindow(QMainWindow):
             elif "双边" in method: result = ai.denoise_bilateral(img, sigma_color=strength, sigma_space=strength)
             elif "中值" in method: result = ai.denoise_median(img, max(1, int(strength / 5) * 2 + 1))
             else: result = ai.denoise_wavelet(img, strength)
-            self.preview.set_image(result)
+            self.commit_processed_result(result, reason="处理结果")
             self.statusBar().showMessage(f"降噪完成 ({method})", 3000)
         except Exception as e:
             QMessageBox.warning(self, "失败", str(e))
@@ -2122,7 +2496,7 @@ class MainWindow(QMainWindow):
                      "forest 森林": "forest"}
         style = style_map.get(self.colorize_style.currentText(), "vintage")
         result = ai.colorize_transfer(img, style)
-        self.preview.set_image(result)
+        self.commit_processed_result(result, reason="处理结果")
         self.statusBar().showMessage("风格应用完成", 3000)
 
     def _ai_enhance(self) -> None:
@@ -2130,7 +2504,7 @@ class MainWindow(QMainWindow):
         img = self.preview.current_image()
         if img is None: return
         result = ai.ai_enhance(img, denoise=5.0, upscale=1.5, saturation=1.2, contrast=1.1)
-        self.preview.set_image(result)
+        self.commit_processed_result(result, reason="处理结果")
         h, w = result.shape[:2]
         self.statusBar().showMessage(f"AI 增强完成: {w}x{h}", 3000)
 
@@ -2213,7 +2587,7 @@ class MainWindow(QMainWindow):
         btn.clicked.connect(self._ai_depth)
         self.right_layout.addWidget(btn)
         tip = QLabel("💡 启发式方法无需下载；Depth Anything V2 更准确")
-        tip.setWordWrap(True); tip.setStyleSheet("color: gray;")
+        tip.setWordWrap(True); tip.setObjectName("hintTip")
         self.right_layout.addWidget(tip)
 
     def _ai_depth(self) -> None:
@@ -2232,7 +2606,7 @@ class MainWindow(QMainWindow):
                     QMessageBox.information(self, "提示",
                         f"模型 {key} 暂不可用，已用启发式替代。")
                     result = ai.depth_map(img)
-            self.preview.set_image(result)
+            self.commit_processed_result(result, reason="处理结果")
             self.statusBar().showMessage("深度图完成", 3000)
         except Exception as e:
             self.statusBar().clearMessage()
@@ -2266,14 +2640,14 @@ class MainWindow(QMainWindow):
         feather = self.shape_feather.value()
         c = [255, 255, 255]
         result = apply_shape_mask(img, key, feather, c)
-        self.preview.set_image(result)
+        self.commit_processed_result(result, reason="处理结果")
 
     def _build_histogram_panel(self) -> None:
         from processors import histogram
         self._add_section("直方图")
         self.histogram_label = QLabel("尚未生成")
         self.histogram_label.setFixedHeight(200)
-        self.histogram_label.setStyleSheet("border: 1px solid #555;")
+        self.histogram_label.setObjectName("histogramBox")
         self.right_layout.addWidget(self.histogram_label)
         btn = QPushButton("生成直方图")
         btn.clicked.connect(self._generate_histogram)
@@ -2381,7 +2755,7 @@ class MainWindow(QMainWindow):
         if img1 is None or not p2: return
         img2 = load_image(p2)
         result = compare.difference_image(img1, img2)
-        self.preview.set_image(result)
+        self.commit_processed_result(result, reason="处理结果")
 
     def _build_checksum_panel(self) -> None:
         self._add_section("Checksum / 哈希")
@@ -2452,7 +2826,7 @@ class MainWindow(QMainWindow):
     def _make_qr(self) -> None:
         from processors import barcode
         r = barcode.generate_qr(self.qr_input.text(), self.qr_size.value())
-        self.preview.set_image(r)
+        self.commit_processed_result(r, reason="处理结果")
 
     def _decode_barcode(self) -> None:
         from processors import barcode
@@ -2492,18 +2866,18 @@ class MainWindow(QMainWindow):
     def _make_linear_grad(self) -> None:
         from processors import gradients
         r = gradients.linear_gradient(800, 600, (255, 0, 128), (0, 255, 255), self.gr_angle.value())
-        self.preview.set_image(r)
+        self.commit_processed_result(r, reason="处理结果")
 
     def _make_radial_grad(self) -> None:
         from processors import gradients
         r = gradients.radial_gradient(800, 600, (255, 0, 128), (0, 255, 255))
-        self.preview.set_image(r)
+        self.commit_processed_result(r, reason="处理结果")
 
     def _make_mesh_grad(self) -> None:
         from processors.gradients import MESH_PRESETS
         colors = MESH_PRESETS.get(self.gr_preset.currentText(), gradients.PIRETTI_MESH)
         r = gradients.mesh_gradient(500, 500, colors)
-        self.preview.set_image(r)
+        self.commit_processed_result(r, reason="处理结果")
 
     def _build_stitch_panel(self) -> None:
         self._add_section("拼接 / 拼贴 / 分割")
@@ -2534,7 +2908,7 @@ class MainWindow(QMainWindow):
         imgs = ([img1] if img1 is not None else []) + [load_image(f) for f in files]
         if mode == "h": r = stitch.stack_horizontal(imgs)
         else: r = stitch.stack_vertical(imgs)
-        self.preview.set_image(r)
+        self.commit_processed_result(r, reason="处理结果")
 
     def _do_collage(self) -> None:
         from processors import stitch
@@ -2545,7 +2919,7 @@ class MainWindow(QMainWindow):
         cols, ok = QInputDialog.getInt(self, "拼贴", "列数?", 3, 1, 10)
         if not ok: return
         r = stitch.grid_stack(imgs, cols=cols)
-        self.preview.set_image(r)
+        self.commit_processed_result(r, reason="处理结果")
 
     def _do_split(self) -> None:
         from processors import stitch
@@ -2719,7 +3093,7 @@ class MainWindow(QMainWindow):
         if img is None: return
         fn = LUT_PRESETS.get(self.lut_combo.currentText())
         if fn is None: return
-        self.preview.set_image(lut.apply_lut(img, fn()))
+        self.commit_processed_result(lut.apply_lut(img, fn()), reason="LUT 应用")
 
     def _apply_curve_preset(self) -> None:
         from processors import lut
@@ -2732,7 +3106,7 @@ class MainWindow(QMainWindow):
             "增加对比": [(0, 0), (64, 20), (191, 235), (255, 255)],
         }
         pts = presets.get(self.curve_preset.currentText(), presets["S曲线"])
-        self.preview.set_image(lut.tone_curve(img, pts))
+        self.commit_processed_result(lut.tone_curve(img, pts), reason="色调曲线")
 
     def _build_smart_resize_panel(self) -> None:
         from processors import batch as batch_pro
@@ -2771,13 +3145,13 @@ class MainWindow(QMainWindow):
         img = self.preview.get_image()
         if img is None: return
         tw, th = SOCIAL_PRESETS.get(self.sm_combo.currentText(), (1920, 1080))
-        self.preview.set_image(smart_resize_by_size(img, tw, th))
+        self.commit_processed_result(smart_resize_by_size(img, tw, th), reason="智能缩放")
 
     def _apply_smart_custom(self) -> None:
         from processors.batch import smart_resize_by_size
         img = self.preview.get_image()
         if img is None: return
-        self.preview.set_image(smart_resize_by_size(img, self.sm_w.value(), self.sm_h.value()))
+        self.commit_processed_result(smart_resize_by_size(img, self.sm_w.value(), self.sm_h.value()), reason="智能缩放")
 
     def _apply_smart_size(self) -> None:
         from processors.batch import resize_to_weight
@@ -2871,7 +3245,7 @@ class MainWindow(QMainWindow):
                 if not src or len(tiles)<10: QMessageBox.warning(self,"素材不足","照片马赛克至少需要 10 张素材图片"); return
                 out=QFileDialog.getSaveFileName(self,"保存照片马赛克","mosaic.jpg","JPEG (*.jpg)")[0]
                 if not out: return
-                from processors.parity import photomosaic; photomosaic(src,tiles,out,self.mosaic_columns.value(),self.mosaic_repeat.value(),self.mosaic_blend.value(),self.mosaic_max.value()); self.preview.set_image(load_image(out)); return
+                from processors.parity import photomosaic; photomosaic(src,tiles,out,self.mosaic_columns.value(),self.mosaic_repeat.value(),self.mosaic_blend.value(),self.mosaic_max.value()); self.commit_processed_result(load_image(out), reason="Parity 照片马赛克"); return
             elif kind=="fusion":
                 files,_=QFileDialog.getOpenFileNames(self,"选择融合帧","","图片 (*.png *.jpg *.jpeg *.webp)")
                 if len(files)<2: return
@@ -2890,7 +3264,7 @@ class MainWindow(QMainWindow):
                 ext=self.creator_format.currentText().lower(); out=QFileDialog.getSaveFileName(self,"保存动画",f"animation.{ext}")[0]
                 if not out: return
                 from processors.parity import convert_animation_format; convert_animation_format(files[0],out,self.creator_format.currentText(),self.creator_fps.value()); self.statusBar().showMessage(f"动画已保存: {out}",4000); return
-            self.preview.set_image(load_image(out)); self.statusBar().showMessage("处理完成",3000)
+            self.commit_processed_result(load_image(out)); self.statusBar().showMessage("处理完成",3000, reason="处理结果")
         except Exception as e: QMessageBox.warning(self,"处理失败",str(e))
 
     def _build_batch_rename_panel(self) -> None:
@@ -3873,6 +4247,186 @@ class MainWindow(QMainWindow):
 
     def _build_crypto2_panel(self) -> None:
         self._build_crypto_panel()
+
+    def _build_advanced_filters_panel(self) -> None:
+        from processors import advanced_filters as af
+        self._add_section("🎞️ 胶片 & 风格化滤镜")
+        tip = QLabel("点击按钮将对应滤镜直接应用到当前图像。所有滤镜均无参数，可组合使用。")
+        tip.setObjectName("hintTip"); tip.setWordWrap(True)
+        self.right_layout.addWidget(tip)
+
+        groups = [
+            ("经典胶片", ["lomo", "polaroid", "kodachrome", "technicolor", "cross_process",
+                          "bleach_bypass", "orange_teal", "fuji_film", "cinema_4d",
+                          "vintage_teal", "washed_out", "warm_sunset", "cool_winter"]),
+            ("调色 / 双色调", ["tri_tone", "duo_tone", "sepia_ii", "cyanotype",
+                               "black_iron", "aqua", "green_moon", "sunset_orange",
+                               "movie_blue", "forest_green", "rose_pink", "pastel", "cream"]),
+            ("单色", ["mono_red", "mono_blue", "mono_green", "mono_yellow",
+                     "mono_purple", "mono_cyan"]),
+            ("效果增强", ["glow", "neon_glow", "hologram", "vintage_teal"]),
+            ("畸变 / 几何", ["fisheye", "barrel_distortion", "pinhole",
+                             "mirror_reflection", "dual_split", "kaleidoscope"]),
+            ("像素 / 艺术化", ["pixelate", "halftone", "dither_bayer",
+                               "reduce_colors", "ascii_filter", "posterize",
+                               "threshold", "silhouette"]),
+            ("模糊 / 锐化 / 色差", ["bokeh", "chromatic_aberration", "motion_blur",
+                                    "directional_blur", "zoom_blur", "radial_blur",
+                                    "emboss", "light_leaks", "double_exposure"]),
+            ("噪点 / 颗粒", ["grainy", "noise_add", "salt_pepper", "scanline",
+                             "crt", "tv_static", "bn_waffle", "apple_tv"]),
+            ("特殊", ["cyberpunk", "thermal", "night_vision", "infrared",
+                      "add_watermark", "lens_flare"]),
+        ]
+        try:
+            _ = af.tri_tone  # noqa
+        except AttributeError:
+            pass
+
+        for title, names in groups:
+            box = QGroupBox(title)
+            grid = QGridLayout(box)
+            grid.setSpacing(6)
+            cols = 3
+            for i, name in enumerate(names):
+                if not hasattr(af, name):
+                    continue
+                btn = QPushButton(name.replace("_", " ").title())
+                btn.setObjectName("secondary")
+                btn.clicked.connect(lambda _=False, n=name: self._apply_af(n))
+                grid.addWidget(btn, i // cols, i % cols)
+            self.right_layout.addWidget(box)
+
+    def _apply_af(self, name: str) -> None:
+        from processors import advanced_filters as af
+        img = self.preview.current_image()
+        if img is None:
+            QMessageBox.information(self, "提示", "请先打开一张图片")
+            return
+        try:
+            fn = getattr(af, name)
+            result = fn(img)
+            self.commit_processed_result(result, reason=f"高级滤镜 · {name}")
+            self.statusBar().showMessage(f"已应用: {name}", 2500)
+        except Exception as e:
+            QMessageBox.warning(self, "失败", f"{name}: {e}")
+
+    def _build_fractal_panel(self) -> None:
+        from processors import fractal as frac
+        self._add_section("🌀 分形生成器")
+
+        box_out = QGroupBox("输出")
+        form = QFormLayout(box_out)
+        self.frac_w = QSpinBox(); self.frac_w.setRange(64, 4096); self.frac_w.setValue(800)
+        self.frac_h = QSpinBox(); self.frac_h.setRange(64, 4096); self.frac_h.setValue(800)
+        form.addRow("宽度:", self.frac_w); form.addRow("高度:", self.frac_h)
+        self.right_layout.addWidget(box_out)
+
+        box_formula = QGroupBox("公式")
+        form2 = QFormLayout(box_formula)
+        self.frac_formula = QComboBox()
+        keys = frac.formula_keys()
+        display_names = {
+            "mandelbrot": "Mandelbrot",
+            "julia": "Julia",
+            "burning_ship": "Burning Ship",
+            "tricorn": "Tricorn",
+            "phoenix": "Phoenix",
+            "newton": "Newton",
+            "nova": "Nova",
+            "magnet1": "Magnet Type I",
+            "magnet2": "Magnet Type II",
+            "celtic": "Celtic",
+            "buffalo": "Buffalo",
+            "perp_ship": "Perpendicular Ship",
+            "multicorn": "Multicorn",
+        }
+        for k in keys:
+            self.frac_formula.addItem(display_names.get(k, k), k)
+        self.frac_formula.currentIndexChanged.connect(self._on_frac_formula_change)
+        form2.addRow("公式:", self.frac_formula)
+        self.right_layout.addWidget(box_formula)
+
+        box_center = QGroupBox("坐标 / 比例")
+        form3 = QFormLayout(box_center)
+        self.frac_cx = QDoubleSpinBox(); self.frac_cx.setRange(-10, 10); self.frac_cx.setDecimals(4); self.frac_cx.setValue(-0.5)
+        self.frac_cy = QDoubleSpinBox(); self.frac_cy.setRange(-10, 10); self.frac_cy.setDecimals(4); self.frac_cy.setValue(0.0)
+        self.frac_scale = QDoubleSpinBox(); self.frac_scale.setRange(0.1, 1000); self.frac_scale.setDecimals(2); self.frac_scale.setValue(3.0); self.frac_scale.setSingleStep(0.1)
+        form3.addRow("中心 X:", self.frac_cx); form3.addRow("中心 Y:", self.frac_cy); form3.addRow("缩放:", self.frac_scale)
+        self.right_layout.addWidget(box_center)
+
+        box_param = QGroupBox("迭代参数")
+        form4 = QFormLayout(box_param)
+        self.frac_iter = QSpinBox(); self.frac_iter.setRange(10, 10000); self.frac_iter.setValue(256)
+        self.frac_power = QDoubleSpinBox(); self.frac_power.setRange(0.5, 20); self.frac_power.setDecimals(2); self.frac_power.setValue(2.0)
+        self.frac_bailout = QDoubleSpinBox(); self.frac_bailout.setRange(1.5, 1000); self.frac_bailout.setDecimals(2); self.frac_bailout.setValue(2.0)
+        form4.addRow("最大迭代:", self.frac_iter); form4.addRow("指数 (power):", self.frac_power); form4.addRow("逃逸半径:", self.frac_bailout)
+        self.right_layout.addWidget(box_param)
+
+        box_color = QGroupBox("着色")
+        form5 = QFormLayout(box_color)
+        self.frac_coloring = QComboBox(); self.frac_coloring.addItems(["平滑过渡", "条纹", "灰度"]); self.frac_coloring.setCurrentIndex(0)
+        self.frac_supersample = QSpinBox(); self.frac_supersample.setRange(1, 4); self.frac_supersample.setValue(1)
+        form5.addRow("模式:", self.frac_coloring); form5.addRow("超采样:", self.frac_supersample)
+        self.right_layout.addWidget(box_color)
+
+        self.frac_julia_box = QGroupBox("Julia 常数")
+        fjl = QFormLayout(self.frac_julia_box)
+        self.frac_jx = QDoubleSpinBox(); self.frac_jx.setRange(-2, 2); self.frac_jx.setDecimals(4); self.frac_jx.setValue(-0.8)
+        self.frac_jy = QDoubleSpinBox(); self.frac_jy.setRange(-2, 2); self.frac_jy.setDecimals(4); self.frac_jy.setValue(0.156)
+        fjl.addRow("Re:", self.frac_jx); fjl.addRow("Im:", self.frac_jy)
+        self.right_layout.addWidget(self.frac_julia_box)
+        self._on_frac_formula_change()
+
+        btn = QPushButton("🌀 渲染分形"); btn.clicked.connect(self._render_fractal)
+        self.right_layout.addWidget(btn)
+
+    def _on_frac_formula_change(self) -> None:
+        from processors import fractal as frac
+        key = self.frac_formula.currentData()
+        info = frac.formula_info(key)
+        can_julia = key in ("julia", "phoenix", "nova")
+        self.frac_julia_box.setVisible(can_julia)
+        if info:
+            self.frac_power.setEnabled(info.get("can_power", True))
+            self.frac_bailout.setEnabled(info.get("can_bailout", True))
+
+    def _render_fractal(self) -> None:
+        from processors import fractal as frac
+        from processors.cancellation import CancelToken
+        from PIL import Image
+        import numpy as np
+
+        key = self.frac_formula.currentData()
+        coloring_map = {0: "smooth", 1: "banded", 2: "grayscale"}
+
+        params = frac.FractalParams(
+            width=self.frac_w.value(),
+            height=self.frac_h.value(),
+            cx=self.frac_cx.value(),
+            cy=self.frac_cy.value(),
+            scale=self.frac_scale.value(),
+            power=self.frac_power.value(),
+            iterations=self.frac_iter.value(),
+            bailout=self.frac_bailout.value(),
+            coloring=frac.FractalColoring(coloring_map[self.frac_coloring.currentIndex()]),
+            julia_c=frac.JuliaConstant(real=self.frac_jx.value(), imag=self.frac_jy.value()),
+            supersampling=self.frac_supersample.value(),
+        )
+
+        def worker(progress, cancel_token):
+            result = frac.render_fractal(
+                self.frac_w.value(), self.frac_h.value(), key,
+                params=params, cancel_token=cancel_token, progress_cb=progress,
+            )
+            return np.array(result.image)
+
+        task = self.task_queue.enqueue(f"分形 · {key} {params.width}x{params.height}", worker)
+        task.signals.finished.connect(self._on_fractal_finished)
+        task.signals.failed.connect(lambda e: QMessageBox.warning(self, "渲染失败", e))
+
+    def _on_fractal_finished(self, result) -> None:
+        self.commit_processed_result(result, reason="分形生成")
 
 
 def main() -> None:

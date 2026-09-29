@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QWidget
 class ImagePreview(QWidget):
     imageChanged = Signal()
     mouseMoved = Signal(int, int)
+    resetRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,11 +23,19 @@ class ImagePreview(QWidget):
         self._dragging: bool = False
         self._drag_start: QPoint = QPoint(0, 0)
         self._fit_mode: bool = True
-        self._zoom_anim: float = 0.0
+        self._generation: int = 0
         self.setMinimumSize(400, 300)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAcceptDrops(True)
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    def bump_generation(self) -> int:
+        self._generation += 1
+        return self._generation
 
     def set_image(self, arr: np.ndarray) -> None:
         self._image = arr.copy()
@@ -35,7 +44,13 @@ class ImagePreview(QWidget):
         self._fit_mode = True
         self._scale = 1.0
         self._offset = QPoint(0, 0)
+        self._generation += 1
         self.imageChanged.emit()
+        self.update()
+
+    def set_display(self, arr: np.ndarray) -> None:
+        self._image = arr.copy()
+        self._pixmap = self._numpy_to_pixmap(arr)
         self.update()
 
     def update_current(self, arr: np.ndarray) -> None:
@@ -50,7 +65,19 @@ class ImagePreview(QWidget):
     def current_image(self) -> np.ndarray | None:
         return self._image
 
+    def original_image(self) -> np.ndarray | None:
+        return self._original
+
     def fit_image(self) -> None:
+        self._compute_fit()
+        self.update()
+
+    def _compute_fit(self) -> None:
+        """Recompute the fit transform without repainting.
+
+        Kept separate from fit_image() because paintEvent needs the geometry but
+        must not call update() from inside a paint (that schedules another paint).
+        """
         if self._pixmap is None:
             return
         pw, ph = self._pixmap.width(), self._pixmap.height()
@@ -60,7 +87,6 @@ class ImagePreview(QWidget):
         self._scale = min(vw / pw, vh / ph) * 0.95
         self._offset = QPoint(int((vw - pw * self._scale) / 2), int((vh - ph * self._scale) / 2))
         self._fit_mode = True
-        self.update()
 
     def actual_size(self) -> None:
         self._scale = 1.0
@@ -92,6 +118,9 @@ class ImagePreview(QWidget):
         return self._scale
 
     def _numpy_to_pixmap(self, arr: np.ndarray) -> QPixmap:
+        # QImage wraps the numpy buffer directly, so the strides must match the
+        # assumed bytesPerLine: a non-contiguous view would render garbled.
+        arr = np.ascontiguousarray(arr)
         if arr.ndim == 2:
             h, w = arr.shape
             qimg = QImage(arr.data, w, h, w, QImage.Format_Grayscale8)
@@ -108,17 +137,14 @@ class ImagePreview(QWidget):
         painter.fillRect(self.rect(), QColor("#11111b"))
         if self._pixmap is None:
             painter.setPen(QColor("#a6adc8"))
-            painter.drawText(self.rect(), Qt.AlignCenter, "将图片拖到这里\\n或使用 Ctrl+O 打开文件")
+            painter.drawText(self.rect(), Qt.AlignCenter, "将图片拖到这里\n或使用 Ctrl+O 打开文件")
             return
         if self._fit_mode and abs(self._scale - 1.0) < 0.001:
-            self.fit_image()
+            self._compute_fit()
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         painter.setRenderHint(QPainter.Antialiasing)
         target_rect = QRect(self._offset, self._pixmap.size() * self._scale)
         painter.drawPixmap(target_rect, self._pixmap)
-
-    def _dark_background(self) -> bool:
-        return self._image is not None and self._image.mean() > 128
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
@@ -158,7 +184,7 @@ class ImagePreview(QWidget):
         elif event.key() == Qt.Key_1:
             self.actual_size()
         elif event.key() == Qt.Key_Escape:
-            self.reset_to_original()
+            self.resetRequested.emit()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
