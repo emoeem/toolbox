@@ -101,7 +101,7 @@ python main.py
 uv run python -m unittest discover -s tests -v
 ```
 
-当前测试覆盖：263 tests / OK（1 skipped：本机装有 `glslangValidator` 时该「工具缺失」用例跳过）
+当前测试覆盖：268 tests / OK（1 skipped：本机装有 `glslangValidator` 时该「工具缺失」用例跳过）
 
 > 分支模型、CI 流程、必需状态检查与本地复现命令见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 > `main` 受保护：只接受 PR 合入且必须通过 CI 检查 `test`。

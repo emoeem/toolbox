@@ -1,5 +1,59 @@
 # Changelog
 
+## 2026-09-29 (第三轮 — 手工运行发现的崩溃)
+
+实际运行 `main.py` 时暴露的一批"点击才触发"的缺陷。这类问题不会被单元测试
+发现，因为没有任何测试会去点那些按钮 —— 已补充静态与生命周期回归测试。
+
+### Fixed
+
+- **`self.preview.get_image()` 不存在（14 处调用点，13 个功能全部报
+  `AttributeError`）**。`ImagePreview` 的访问器是 `current_image()`，
+  `get_image()` 从未存在过。受影响：图像对比、差异图、图像校验和、条码/二维码
+  解码、形状遮罩、直方图、拼接/拼贴/分割、LUT 预设、曲线预设、智能缩放
+  （preset/custom/size）。全部改为 `current_image()`。
+- **3 处 `NameError`（模块未导入）**：
+  - `_apply_lut_preset()` 使用裸 `lut.`，但只导入了 `LUT_PRESETS`，且 `lut`
+    仅在**另一个**函数里局部导入 —— 运行时 `NameError: name 'lut' is not defined`；
+  - `_make_mesh_grad()` 使用裸 `gradients.`（同样只导入了 `MESH_PRESETS`）；
+  - 批量转换的 `conv_worker()` 使用裸 `utils.load_image/save_image`，改用模块级
+    已导入的 `load_image` / `save_image`。
+- **撤销 / 重置在切换工具后崩溃**
+  `RuntimeError: libshiboken: Internal C++ object (QListWidget) already deleted`。
+  面板在切换工具时通过 `setParent(None)` + `deleteLater()` 销毁，但 Python
+  属性仍指向已析构的 C++ 对象；`undo()` / `reset_all()` 是跨面板可达的
+  （前者还有全局快捷键），因此 `_refresh_chain_list()` 与
+  `filter_param_widget.reset_to_defaults()` 会踩到已删除对象。
+  原有 `hasattr(self, '_refresh_chain_list')` 这类守卫是无效的 —— 方法一直存在，
+  需要检查的是 **widget 本身是否还活着**。新增 `_widget_alive()`
+  （基于 `shiboken6.isValid`）并在两处加守卫。
+
+### Added — Tests
+
+- `tests/test_main_window_static.py`（5 项）：
+  - `test_every_preview_method_used_exists` —— 扫描 `main_window.py` 里所有
+    `self.preview.<名字>`，断言它们在 `ImagePreview` 上真实存在（可捕获本次
+    14 处同类缺陷）；
+  - `test_main_window_module_references_are_imported` —— AST 逐函数分析，
+    断言函数内用到的 `processors` 子模块在该作用域可见（可捕获本次 3 处
+    `NameError`，且能区分"在别的函数里导入过"这种假阴性）；
+  - 生命周期用例：切换面板销毁 Filter panel 后 `undo()` / `reset_all()` 不得抛错，
+    以及从未构建 Filter panel 时 `reset_all()` 可用（preview 的 Esc 快捷键路径）。
+
+两个静态用例都做过变异验证：把 `get_image()` 或未加守卫的
+`self._chain_list.clear()` 放回去，对应用例立即失败。
+
+### Verification
+
+- `QT_QPA_PLATFORM=offscreen TOOLBOX_NO_NUMBA=1 .venv/bin/python -m unittest discover -s tests`
+  → **268 tests / OK（1 skipped）**
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest tests.test_fractal tests.test_filter_robustness tests.test_core` → 56 tests / OK
+- `_smoke_test.py` → ALL SMOKE TEST PASSED
+- 逐个驱动真实 UI 处理函数验证（对比 / 差异图 / 校验和 / 条码 / 直方图 /
+  形状遮罩 / 拼接 / 拼贴 / 分割 / LUT / 曲线 / 智能缩放 x3）均已通过。
+
+---
+
 ## 2026-09-29 (第二轮 — 代码审查 / Bug 修复 / 性能优化)
 
 审查范围：全仓库约 12.5k 行。所有结论均由可重复命令或实测数据支撑；详见
