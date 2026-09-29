@@ -101,7 +101,10 @@ python main.py
 uv run python -m unittest discover -s tests -v
 ```
 
-当前测试覆盖：262 tests（261 PASS + 1 GMIC timeout，GMIC CLI 在部分环境不可用属于 pre-existing）
+当前测试覆盖：263 tests / OK（1 skipped：本机装有 `glslangValidator` 时该「工具缺失」用例跳过）
+
+> 分支模型、CI 流程、必需状态检查与本地复现命令见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+> `main` 受保护：只接受 PR 合入且必须通过 CI 检查 `test`。
 
 > 缓存/预设目录会做可写性探测（`processors.utils.ensure_writable_dir`），
 > 只读 HOME 或容器环境下自动回退到系统临时目录，而不是抛出裸 `OSError`。
