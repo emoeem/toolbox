@@ -38,6 +38,28 @@ from processors import gmic, media, pdf_tools, parity
 from .preview_widget import ImagePreview
 from .theme import LIGHT_QSS, DARK_QSS, build_system_qss
 from .workbench import TaskQueueWidget, LogWidget, make_dock
+
+
+def _widget_alive(widget) -> bool:
+    """True when ``widget`` still wraps a live C++ object.
+
+    Panels are torn down with ``setParent(None)`` + ``deleteLater()`` whenever the
+    user switches tools, but the Python attributes keep pointing at the destroyed
+    QObject.  Touching one afterwards raises
+    "RuntimeError: Internal C++ object already deleted" (e.g. Undo calling
+    ``_refresh_chain_list`` after leaving the Filter tool).
+    """
+    if widget is None:
+        return False
+    try:
+        from shiboken6 import isValid
+    except ImportError:  # pragma: no cover - shiboken ships with PySide6
+        return True
+    try:
+        return bool(isValid(widget))
+    except Exception:  # pragma: no cover - defensive
+        return False
+
 from .panels.shader_studio import ShaderStudioPanel
 from .panels.texture_studio import TextureStudioPanel
 from .fonts import apply as apply_fonts
@@ -392,7 +414,9 @@ class MainWindow(QMainWindow):
             self._filter_chain = FilterChain()
             if hasattr(self, '_refresh_chain_list'):
                 self._refresh_chain_list()
-        if hasattr(self, 'filter_param_widget'):
+        # Reachable from the preview's Escape shortcut on any tool, so the Filter
+        # panel (and its parameter widget) may already be destroyed.
+        if _widget_alive(getattr(self, 'filter_param_widget', None)):
             self.filter_param_widget.reset_to_defaults()
         self._pending_preview_params = None
         self._pending_preview_key = None
@@ -1043,6 +1067,10 @@ class MainWindow(QMainWindow):
         self._add_stretch()
 
     def _refresh_chain_list(self) -> None:
+        # Reachable from cross-panel paths (undo / reset / load / preset load)
+        # after the Filter panel has been torn down, so the widget may be gone.
+        if not _widget_alive(getattr(self, '_chain_list', None)):
+            return
         self._chain_list.clear()
         for i, step in enumerate(self._filter_chain):
             defn = step.filter_def
@@ -2634,7 +2662,7 @@ class MainWindow(QMainWindow):
 
     def _apply_shape_mask(self) -> None:
         from processors.shapes import apply_shape_mask
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         key = self.shape_combo.currentData()
         feather = self.shape_feather.value()
@@ -2662,7 +2690,7 @@ class MainWindow(QMainWindow):
         self._generate_histogram()
 
     def _generate_histogram(self) -> None:
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         from processors import histogram
         from PIL import Image, ImageDraw
@@ -2737,7 +2765,7 @@ class MainWindow(QMainWindow):
     def _do_compare(self) -> None:
         from processors import compare
         from processors.utils import load_image
-        img1 = self.preview.get_image()
+        img1 = self.preview.current_image()
         p2 = self.compare_path_edit.text()
         if img1 is None or not p2: return
         img2 = load_image(p2)
@@ -2750,7 +2778,7 @@ class MainWindow(QMainWindow):
     def _do_diff_image(self) -> None:
         from processors import compare
         from processors.utils import load_image
-        img1 = self.preview.get_image()
+        img1 = self.preview.current_image()
         p2 = self.compare_path_edit.text()
         if img1 is None or not p2: return
         img2 = load_image(p2)
@@ -2784,7 +2812,7 @@ class MainWindow(QMainWindow):
 
     def _do_checksum_image(self) -> None:
         from processors import checksum
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         r = checksum.all_hashes(img)
         self.chk_result.setPlainText("\n".join(f"{k.upper():>10}: {v}" for k, v in r.items()))
@@ -2830,7 +2858,7 @@ class MainWindow(QMainWindow):
 
     def _decode_barcode(self) -> None:
         from processors import barcode
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         results = barcode.decode_qr(img)
         if not results: self.barcode_result.setPlainText("未检测到条形码")
@@ -2874,8 +2902,8 @@ class MainWindow(QMainWindow):
         self.commit_processed_result(r, reason="处理结果")
 
     def _make_mesh_grad(self) -> None:
-        from processors.gradients import MESH_PRESETS
-        colors = MESH_PRESETS.get(self.gr_preset.currentText(), gradients.PIRETTI_MESH)
+        from processors import gradients
+        colors = gradients.MESH_PRESETS.get(self.gr_preset.currentText(), gradients.PIRETTI_MESH)
         r = gradients.mesh_gradient(500, 500, colors)
         self.commit_processed_result(r, reason="处理结果")
 
@@ -2902,7 +2930,7 @@ class MainWindow(QMainWindow):
     def _do_stitch(self, mode: str) -> None:
         from processors import stitch
         from processors.utils import load_image
-        img1 = self.preview.get_image()
+        img1 = self.preview.current_image()
         files, _ = QFileDialog.getOpenFileNames(self, "选择图片")
         if not files: return
         imgs = ([img1] if img1 is not None else []) + [load_image(f) for f in files]
@@ -2913,7 +2941,7 @@ class MainWindow(QMainWindow):
     def _do_collage(self) -> None:
         from processors import stitch
         from processors.utils import load_image
-        img1 = self.preview.get_image()
+        img1 = self.preview.current_image()
         files, _ = QFileDialog.getOpenFileNames(self, "选择图片")
         imgs = ([img1] if img1 is not None else []) + [load_image(f) for f in files]
         cols, ok = QInputDialog.getInt(self, "拼贴", "列数?", 3, 1, 10)
@@ -2924,7 +2952,7 @@ class MainWindow(QMainWindow):
     def _do_split(self) -> None:
         from processors import stitch
         from processors.utils import save_image
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         tiles = stitch.split_grid(img, self.split_rows.value(), self.split_cols.value())
         out_dir = QFileDialog.getExistingDirectory(self, "保存分割图片")
@@ -3039,9 +3067,9 @@ class MainWindow(QMainWindow):
             def conv_worker(progress):
                 done = 0
                 for i, f in enumerate(files, 1):
-                    img = utils.load_image(f)
+                    img = load_image(f)
                     out_name = Path(f).stem + "." + fmt
-                    utils.save_image(img, os.path.join(out_dir, out_name))
+                    save_image(img, os.path.join(out_dir, out_name))
                     done += 1
                     progress(i * 100 // len(files))
                 return done
@@ -3088,16 +3116,16 @@ class MainWindow(QMainWindow):
         self.right_layout.addWidget(btn_curve)
 
     def _apply_lut_preset(self) -> None:
-        from processors.lut import LUT_PRESETS
-        img = self.preview.get_image()
+        from processors import lut
+        img = self.preview.current_image()
         if img is None: return
-        fn = LUT_PRESETS.get(self.lut_combo.currentText())
+        fn = lut.LUT_PRESETS.get(self.lut_combo.currentText())
         if fn is None: return
         self.commit_processed_result(lut.apply_lut(img, fn()), reason="LUT 应用")
 
     def _apply_curve_preset(self) -> None:
         from processors import lut
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         presets = {
             "S曲线": [(0, 0), (80, 40), (128, 128), (176, 215), (255, 255)],
@@ -3142,20 +3170,20 @@ class MainWindow(QMainWindow):
 
     def _apply_smart_preset(self) -> None:
         from processors.batch import SOCIAL_PRESETS, smart_resize_by_size
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         tw, th = SOCIAL_PRESETS.get(self.sm_combo.currentText(), (1920, 1080))
         self.commit_processed_result(smart_resize_by_size(img, tw, th), reason="智能缩放")
 
     def _apply_smart_custom(self) -> None:
         from processors.batch import smart_resize_by_size
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         self.commit_processed_result(smart_resize_by_size(img, self.sm_w.value(), self.sm_h.value()), reason="智能缩放")
 
     def _apply_smart_size(self) -> None:
         from processors.batch import resize_to_weight
-        img = self.preview.get_image()
+        img = self.preview.current_image()
         if img is None: return
         target = self.sm_kb.value() * 1024
         try:
