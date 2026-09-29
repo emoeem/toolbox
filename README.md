@@ -34,6 +34,8 @@ toolbox/
 │   ├── filter_chain_task.py  # FilterChainWorker + PreviewCache（后台渲染）
 │   ├── batch_filter_chain.py # BatchFilterChain（批处理）
 │   ├── cancellation.py       # CancelToken
+│   ├── _jit.py               # numba maybe_jit 共享助手（缺失时自动降级为纯 Python）
+│   ├── utils.py              # save_image / load_image / ensure_writable_dir
 │   ├── fractal.py            # 分形渲染框架（15 2D + Mandelbulb 3D）
 │   ├── filters.py            # 传统滤镜集合
 │   ├── advanced_filters.py   # 高级滤镜
@@ -44,7 +46,8 @@ toolbox/
 ├── backends/                 # 外部后端（GMIC CLI 等）
 ├── tests/                    # 单元测试
 ├── docs/
-│   └── parity-audit.md       # ImageToolbox parity 审计矩阵
+│   ├── parity-audit.md       # ImageToolbox parity 审计矩阵
+│   └── code-review-fixes.md  # 代码审查报告（Bug 修复 + 性能优化，含实测证据）
 ├── main.py                   # 入口
 ├── pyproject.toml            # PEP 621 项目配置 + 依赖
 └── uv.lock                   # 锁定依赖版本
@@ -98,7 +101,10 @@ python main.py
 uv run python -m unittest discover -s tests -v
 ```
 
-当前测试覆盖：223 tests（222 PASS + 1 GMIC timeout，GMIC CLI 在部分环境不可用属于 pre-existing）
+当前测试覆盖：262 tests（261 PASS + 1 GMIC timeout，GMIC CLI 在部分环境不可用属于 pre-existing）
+
+> 缓存/预设目录会做可写性探测（`processors.utils.ensure_writable_dir`），
+> 只读 HOME 或容器环境下自动回退到系统临时目录，而不是抛出裸 `OSError`。
 
 ### 重点测试模块
 
@@ -211,9 +217,12 @@ result.escaped_mask              # bool, 是否有逃逸像素
 ### 性能
 
 - 基础路径：纯 Python + `math.sqrt/log`，64×64 Mandelbrot ≈ 10ms
-- numba 可选加速：`_maybe_jit(nopython=True)` 装饰器，检测失败自动 fallback
+- numba 可选加速：`processors/_jit.py` 的 `maybe_jit(nopython=True)` 装饰器，检测失败自动 fallback（`fractal.py` / `filters.py` 共用）
 - 分块渲染：按 row 渲染 + CancelToken 每 row 检查，取消立即终止
-- Preview 自动降分辨率
+- Preview 自动降分辨率（参数预览的降采样源按图像代次缓存；拖动时 384px，停止后自动补 768px）
+- 调整链：跳过等于默认值的步骤，点运算（亮度/对比度/曝光/伽马）走 256 项 LUT
+
+完整实测数据（含逐像素等价性校验）见 [docs/code-review-fixes.md](docs/code-review-fixes.md)。
 
 ### FilterDef 自动注册
 

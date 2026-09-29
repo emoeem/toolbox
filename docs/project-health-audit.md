@@ -411,3 +411,45 @@ type -P gmic magick ffmpeg exiftool potrace tesseract qpdf mutool gs glslangVali
 
 - `uv build --out-dir /tmp/toolbox-build` 已成功生成 sdist 与 wheel；随后临时构建目录已删除。
 - `pyproject.toml` 使用显式 setuptools package discovery，避免 `app/backends/processors/resources` 多顶层目录导致构建失败。
+
+---
+
+## 2026-09-29 第二轮更新（代码审查 / Bug 修复 / 性能优化）
+
+完整证据见 [`docs/code-review-fixes.md`](code-review-fixes.md)。
+
+### 已解决（本轮）
+
+- **`contrast()` 公式回归**（未提交改动引入，会把图像压成约 3 个色调）——已修复并与参考曲线逐像素一致。
+- **`hue_shift()` 色相 `% 180`**（float32 下 OpenCV hue 量程为 0..360）——改为 `% 360`，全色环校验通过。
+- **`FilterDef.apply()` 吞掉内部 `TypeError` 并用默认参数重跑**——改为签名过滤，错误立即上抛。
+- **撤销对滤镜/变换路径完全失效**——统一为 `_commit_image()`（先快照后显示），11 条真实 UI 路径已验证。
+- **保存必崩**（`ndarray or ndarray` 触发 `truth value is ambiguous`）——已修复。
+- **`dither_bayer` / `old_tv` / `anaglyph` 及 5 个退化尺寸滤镜崩溃**——153 filters × 16 sizes = 2448 runs 现 0 失败。
+- **`LineEditor._gutter` 惰性创建顺序错误**（首次布局即刷 AttributeError，且被 Qt 吞掉）——改为构造时创建。
+- **失败任务永久泄漏全分辨率图**——`failed` 分支现也执行 `_cleanup_task()`。
+- **只读目录被 `mkdir(exist_ok=True)` 误判为可用**——新增 `ensure_writable_dir()`，预设与 GMIC 缓存可回退。
+- **测试套件全局单例污染**（`_test_boom` 泄漏到 `FilterDefRegistry`）——新增 `unregister()` + `tearDownModule`。
+
+### 性能（实测）
+
+- 调整面板「应用调整」GUI 线程阻塞 **2760 ms → 1.2 ms**（后台 78 ms 完成）。
+- `floyd_steinberg` **4479 ms → 5.2 ms**（600×800，逐像素一致；24MP 约 220 s → 0.4 s）。
+- `circular_pixelation` **204 ms → 21 ms**（1200×1600，逐像素一致）。
+- `brightness`/`contrast`/`exposure` LUT 化，**逐像素一致**，4~8x。
+- 撤销历史 **2060 MB → ≤512 MB**（24MP / 30 条）。
+
+### 测试基线
+
+`QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests`
+→ **262 tests / 261 PASS / 1 error**（余 1 为 pre-existing GMIC 环境超时）。
+本轮开始前为 223 tests / 9 errors（9 个全部来自只读 HOME/缓存沙箱限制，其中 5 个预设测试已由可写性回退修复）。
+
+### 仍未解决
+
+- `test_gmic_backend.GmicTests.test_cli_run`：本机沙箱下 `gmic` 无 `-output` 时行为不稳定
+  （`stdin=DEVNULL` 已把无限挂起转为有界返回，仍可能超过 5s 测试超时），属 pre-existing 环境问题。
+- 真实 Wayland/X11 GUI 与 Shader OpenGL runtime 仍无法在无显示环境验证。
+- `MainWindow` 仍约 4400 行（原评估约 2842 行，本轮为修复/重构有所增长），职责拆分未完成。
+- 非线性调整（`saturation`/`vibrance`/`highlights_shadows`/`hue_shift`）24MP 下单项 0.3~0.5 s，未进一步优化。
+- coverage 工具仍未纳入；`equivalent` 仍为 0。
