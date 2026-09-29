@@ -85,13 +85,36 @@ def _cabs(x: float, y: float) -> float:
     return math.sqrt(x * x + y * y)
 
 
+# log(1.7976931348623157e308) is ~709.78; a small margin keeps math.pow from
+# ever being asked for a value that overflows.
+_MAX_LOG_MAG = 709.0
+
+
+@_maybe_jit(nopython=True, cache=True)
+def _safe_pow(r: float, p: float) -> float:
+    """``math.pow(r, p)`` that saturates instead of raising OverflowError.
+
+    numba's nopython ``math.pow`` returns ``inf`` when the result overflows,
+    while CPython raises ``OverflowError: math range error``.  The pure-Python
+    fallback (i.e. numba not installed -- the common case) therefore crashed on
+    diverging orbits in the Newton and Nova formulas.  Values inside the double
+    range still go through ``math.pow`` unchanged, so rendered output is
+    bit-identical wherever it did not raise before.
+    """
+    if r == 0.0:
+        return 0.0
+    if p * math.log(r) > _MAX_LOG_MAG:
+        return math.inf
+    return math.pow(r, p)
+
+
 @_maybe_jit(nopython=True, cache=True)
 def _cpow(x: float, y: float, p: float) -> tuple[float, float]:
     r = math.sqrt(x * x + y * y)
     if r == 0.0:
         return 0.0, 0.0
     theta = math.atan2(y, x)
-    rp = math.pow(r, p)
+    rp = _safe_pow(r, p)
     tp = theta * p
     return rp * math.cos(tp), rp * math.sin(tp)
 
@@ -646,14 +669,14 @@ def _ray_march_mandelbulb(ox: float, oy: float, oz: float, dx: float, dy: float,
             return total_dist + 1e-6
         theta = math.acos(max(-1.0, min(1.0, z / r)))
         phi = math.atan2(y, x)
-        rp = math.pow(r, power)
+        rp = _safe_pow(r, power)
         new_theta = theta * power
         new_phi = phi * power
         x = rp * math.sin(new_theta) * math.cos(new_phi) + ox
         y = rp * math.sin(new_theta) * math.sin(new_phi) + oy
         z = rp * math.cos(new_theta) + oz
         de = 0.0
-        dr = power * math.pow(r, power - 1.0)
+        dr = power * _safe_pow(r, power - 1.0)
         if dr > 0:
             de = 0.5 * math.log(r) * r / dr
         total_dist += de
