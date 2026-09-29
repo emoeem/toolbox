@@ -293,6 +293,13 @@ class FilterDefTests(unittest.TestCase):
 class FilterDefRegistryTests(unittest.TestCase):
     def setUp(self):
         self.reg = FilterDefRegistry.instance()
+        # The registry is a process-wide singleton: snapshot it so the fixtures
+        # registered below (reg1/reg2/cat_*) do not leak into other test modules.
+        self._keys_before = set(self.reg.keys())
+
+    def tearDown(self):
+        for key in set(self.reg.keys()) - self._keys_before:
+            self.reg.unregister(key)
 
     def test_singleton(self):
         self.assertIs(FilterDefRegistry.instance(), FilterDefRegistry.instance())

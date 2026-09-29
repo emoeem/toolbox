@@ -50,6 +50,18 @@ def _register_test_filters():
                         category=FilterCategory.STYLIZE, params=[])
 
 
+_TEST_FILTER_KEYS = ("_test_blur", "_test_strength", "_test_boom")
+
+
+def tearDownModule():
+    """The registry is a process-wide singleton, so the fixtures registered by
+    every class here must be removed once this module is done -- otherwise the
+    deliberately-failing `_test_boom` leaks into other modules."""
+    reg = FilterDefRegistry.instance()
+    for key in _TEST_FILTER_KEYS:
+        reg.unregister(key)
+
+
 class TestFilterChainTask(unittest.TestCase):
     def setUp(self):
         _register_test_filters()
