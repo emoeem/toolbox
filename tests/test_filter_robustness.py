@@ -7,6 +7,7 @@ images, and empty-slice handling in kaleidoscope / mirror_reflection /
 dual_split / reduce_colors / glitch.
 """
 import unittest
+import zlib
 
 import numpy as np
 
@@ -36,7 +37,9 @@ class TestAllFiltersSurviveGeometry(unittest.TestCase):
         for key in self.keys:
             defn = self.registry.get(key)
             for size in SIZES:
-                seed = abs(hash((key, size))) % (2 ** 32)
+                # zlib.crc32, not hash(): PYTHONHASHSEED randomisation would
+                # make the inputs differ on every run and on every machine.
+                seed = zlib.crc32(f"{key}:{size}".encode())
                 img = np.random.default_rng(seed).integers(0, 255, size + (3,), np.uint8)
                 try:
                     out = defn.apply(img.copy(), None)
