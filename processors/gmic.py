@@ -17,7 +17,8 @@ def available() -> bool:
 def version() -> str:
     if not available():
         return ""
-    p = subprocess.run(["gmic", "-version"], capture_output=True, text=True)
+    p = subprocess.run(["gmic", "-version"], capture_output=True, text=True,
+                       timeout=15, stdin=subprocess.DEVNULL)
     m = re.search(r"Version\s+([0-9.]+)", p.stdout)
     return m.group(1) if m else "unknown"
 
@@ -33,6 +34,9 @@ def apply(input_path: str, output_path: str, command: str, cancel_token: CancelT
     p = subprocess.Popen(
         ["gmic", input_path, *command.split(), "-output", output_path],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        # G'MIC reads its command pipeline from stdin when it is not a terminal,
+        # which makes it block forever on an inherited pipe.
+        stdin=subprocess.DEVNULL,
     )
     while p.poll() is None:
         if cancel_token is not None and cancel_token.is_cancelled():
@@ -54,5 +58,6 @@ def apply(input_path: str, output_path: str, command: str, cancel_token: CancelT
 
 
 def command_help(command: str) -> str:
-    p = subprocess.run(["gmic", "-h", command], capture_output=True, text=True)
+    p = subprocess.run(["gmic", "-h", command], capture_output=True, text=True,
+                       timeout=15, stdin=subprocess.DEVNULL)
     return p.stdout or p.stderr

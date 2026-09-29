@@ -6,8 +6,17 @@ import tempfile
 import os
 
 
-def _run(cmd: list[str]) -> None:
-    p = subprocess.run(cmd, capture_output=True, text=True)
+DEFAULT_TIMEOUT = 300.0
+
+
+def _run(cmd: list[str], timeout: float = DEFAULT_TIMEOUT) -> None:
+    """Run an external tool. A hung `magick`/`ffmpeg` must not block forever."""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"缺少外部工具: {cmd[0]}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{cmd[0]} 执行超时（{timeout:.0f}s）") from exc
     if p.returncode != 0:
         raise RuntimeError(p.stderr.strip() or "外部工具执行失败")
 

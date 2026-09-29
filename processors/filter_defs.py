@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import re
 from dataclasses import dataclass, field
@@ -137,6 +138,26 @@ class FilterParam:
         return False, f"'{self.label}' invalid color format"
 
 
+@functools.lru_cache(maxsize=512)
+def _accepted_kwargs(processor: Callable) -> frozenset[str] | None:
+    """Keyword names `processor` accepts, or None if it takes **kwargs.
+
+    Used to filter the parameter dict instead of probing by catching TypeError,
+    which could not be told apart from a TypeError raised *inside* a processor.
+    """
+    try:
+        sig = inspect.signature(processor)
+    except (TypeError, ValueError):
+        return frozenset()
+    names: set[str] = set()
+    for name, p in sig.parameters.items():
+        if p.kind is inspect.Parameter.VAR_KEYWORD:
+            return None
+        if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+            names.add(name)
+    return frozenset(names)
+
+
 @dataclass
 class FilterDef:
     key: str
@@ -174,13 +195,16 @@ class FilterDef:
             raise ValueError("; ".join(errors))
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
-        try:
-            return self.processor(image, **merged) if merged else self.processor(image)
-        except TypeError:
-            try:
-                return self.processor(image)
-            except Exception:
-                raise
+        accepted = _accepted_kwargs(self.processor)
+        if accepted is None:
+            call_kwargs = dict(merged)
+        else:
+            # Keep only params the processor's signature actually accepts.
+            call_kwargs = {k: v for k, v in merged.items() if k in accepted}
+        if cancel_token is not None and accepted is not None and "cancel_token" in accepted:
+            # Let long-running processors honour cancellation cooperatively.
+            call_kwargs["cancel_token"] = cancel_token
+        return self.processor(image, **call_kwargs) if call_kwargs else self.processor(image)
 
     def param(self, name: str) -> FilterParam | None:
         for p in self.params:
@@ -204,6 +228,10 @@ class FilterDefRegistry:
     def register(self, defn: FilterDef) -> FilterDef:
         self._defs[defn.key] = defn
         return defn
+
+    def unregister(self, key: str) -> bool:
+        """Remove a registration; returns True when something was removed."""
+        return self._defs.pop(key, None) is not None
 
     def get(self, key: str) -> FilterDef | None:
         return self._defs.get(key)
@@ -263,7 +291,7 @@ def _infer_params_from_signature(func: Callable) -> list[FilterParam]:
     sig = inspect.signature(func)
     params: list[FilterParam] = []
     for name, p in sig.parameters.items():
-        if name == "img" or name == "image" or name == "src":
+        if name in ("img", "image", "src", "cancel_token"):
             continue
         if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue

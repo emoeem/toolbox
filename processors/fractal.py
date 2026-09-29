@@ -9,21 +9,7 @@ import numpy as np
 from PIL import Image
 
 from processors.cancellation import CancelToken, CancelledError
-
-
-try:
-    from numba import jit, prange
-    _NUMBA_OK = True
-except ImportError:
-    _NUMBA_OK = False
-
-
-def _maybe_jit(nopython=True, fastmath=True, cache=True, parallel=False):
-    if _NUMBA_OK:
-        return jit(nopython=nopython, fastmath=fastmath, cache=cache, parallel=parallel)
-    def _decorator(fn):
-        return fn
-    return _decorator
+from processors._jit import NUMBA_OK as _NUMBA_OK, maybe_jit as _maybe_jit, prange  # noqa: F401
 
 
 class FractalColoring(str, Enum):

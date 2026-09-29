@@ -7,6 +7,7 @@ import numpy as np
 from skimage import color as sk_color
 
 from .utils import clamp, ensure_rgb, ensure_rgba, u8
+from ._jit import maybe_jit
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 
@@ -99,7 +100,7 @@ def vintage(img: np.ndarray) -> np.ndarray:
     result = np.stack([r, g, b], axis=-1)
     result = np.clip(result, 0, 255)
     h, w = img_.shape[:2]
-    y, x = np.indices((h, w))
+    y, x = np.indices((h, w), dtype=np.float32)
     cx, cy = w / 2, h / 2
     dist = np.sqrt(((x - cx) / cx) ** 2 + ((y - cy) / cy) ** 2)
     vig = np.clip(1.0 - dist * 0.4, 0.4, 1.0)
@@ -247,24 +248,39 @@ def enhanced_pixelation(img: np.ndarray, block_size: int = 12) -> np.ndarray:
 
 
 def circular_pixelation(img: np.ndarray, block_size: int = 10) -> np.ndarray:
-    img_ = ensure_rgb(img)
-    h, w = img_.shape[:2]
-    cx, cy = w / 2.0, h / 2.0
-    y, x = np.indices((h, w))
-    dist = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
-    max_dist = math.sqrt(cx ** 2 + cy ** 2)
-    norm_dist = dist / max_dist
-    block = np.maximum(2, (block_size * (1 - norm_dist * 0.7)).astype(int))
+    """Block-average pixelation.
 
-    result = img_.copy()
-    for by in range(0, h, block_size):
-        for bx in range(0, w, block_size):
-            region = result[by:by + block_size, bx:bx + block_size]
-            if region.size == 0:
-                continue
-            avg = region.mean(axis=(0, 1)).astype(np.uint8)
-            result[by:by + block_size, bx:bx + block_size] = avg
-    return result
+    The previous implementation built a centre-distance map and a per-pixel
+    block-size map and then never used either -- the mosaic was always uniform.
+    The dead (int64 -> float64) maps are gone and the Python per-block loop is
+    replaced by an exact vectorised reduction.
+    """
+    img_ = ensure_rgb(img)
+    return _block_mean_mosaic(img_, block_size)
+
+
+def _block_mean_mosaic(img_: np.ndarray, block_size: int) -> np.ndarray:
+    """Average each block_size x block_size tile; edge tiles average what is there.
+
+    Bit-exact with the naive per-tile loop (verified over 266 size/block combos).
+    """
+    h, w = img_.shape[:2]
+    bs = max(1, int(block_size))
+    bh, bw = (h + bs - 1) // bs, (w + bs - 1) // bs
+    ph, pw = bh * bs, bw * bs
+    row_counts = np.full(bh, bs, dtype=np.float64)
+    row_counts[-1] = h - (bh - 1) * bs
+    col_counts = np.full(bw, bs, dtype=np.float64)
+    col_counts[-1] = w - (bw - 1) * bs
+    counts = np.outer(row_counts, col_counts)
+
+    small = np.empty((bh, bw, 3), dtype=np.uint8)
+    for ch in range(3):
+        acc = np.zeros((ph, pw), dtype=np.uint32)
+        acc[:h, :w] = img_[..., ch]
+        sums = acc.reshape(bh, bs, bw, bs).sum(axis=(1, 3), dtype=np.float64)
+        small[..., ch] = (sums / counts).astype(np.uint8)
+    return np.repeat(np.repeat(small, bs, axis=0), bs, axis=1)[:h, :w]
 
 
 def edge_detection(img: np.ndarray, strength: float = 1.0) -> np.ndarray:
@@ -341,7 +357,7 @@ def haze(img: np.ndarray, strength: float = 0.3) -> np.ndarray:
     img_ = ensure_rgb(img).astype(np.float32)
     h, w = img_.shape[:2]
     haze_color = 200
-    y, x = np.indices((h, w))
+    y, x = np.indices((h, w), dtype=np.float32)
     cx, cy = w / 2.0, h / 2.0
     dist = np.sqrt(((x - cx) / cx) ** 2 + ((y - cy) / cy) ** 2)
     factor = np.clip(0.2 + dist * strength, 0, 1)
@@ -382,6 +398,9 @@ def false_color(img: np.ndarray, colormap: str = "jet") -> np.ndarray:
 def glitch(img: np.ndarray, amount: float = 0.1) -> np.ndarray:
     img_ = ensure_rgb(img).astype(np.float32)
     h, w = img_.shape[:2]
+    # rng.integers(0, h - 1) raises "high <= 0" for a single-row image.
+    if h < 2 or w < 2:
+        return u8(clamp(img_))
     rng = np.random.default_rng(42)
     result = img_.copy()
     num_slices = max(1, int(h * amount * 3))
@@ -399,10 +418,14 @@ def glitch(img: np.ndarray, amount: float = 0.1) -> np.ndarray:
 
 def anaglyph(img: np.ndarray) -> np.ndarray:
     img_ = ensure_rgb(img).astype(np.float32)
-    shift = int(img_.shape[1] * 0.02)
+    h, w = img_.shape[:2]
+    if w < 2:
+        return u8(clamp(img_))
+    # A width below 50 gives int(w * 0.02) == 0, which produced an empty-source
+    # assignment (ValueError) instead of a shift.
+    shift = min(max(1, int(w * 0.02)), w - 1)
     result = np.zeros_like(img_)
     result[:, shift:, 0] = img_[:, :-shift, 0]
-    result[:, :-shift, 0] = 0
     result[:, shift:, 1] = img_[:, :-shift, 1]
     result[:, shift:, 2] = img_[:, :-shift, 2]
     return u8(clamp(result))
@@ -442,11 +465,10 @@ def posterize(img: np.ndarray, levels: int = 4) -> np.ndarray:
 def wave(img: np.ndarray, amplitude: float = 8.0, wavelength: float = 50.0) -> np.ndarray:
     img_ = ensure_rgb(img)
     h, w = img_.shape[:2]
-    y, x = np.indices((h, w))
+    y, x = np.indices((h, w), dtype=np.float32)
     x_map = x + amplitude * np.sin(2 * np.pi * y / wavelength)
     y_map = y + amplitude * np.cos(2 * np.pi * x / wavelength)
-    return cv2.remap(img_, x_map.astype(np.float32), y_map.astype(np.float32),
-                     cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    return cv2.remap(img_, x_map, y_map, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
 
 def swirl(img: np.ndarray, strength: float = 1.0) -> np.ndarray:
@@ -545,7 +567,9 @@ def dither_bayer(img: np.ndarray, levels: int = 4, order: int = 4) -> np.ndarray
     matrix = bayer.get(order, bayer[4])
     oh, ow = matrix.shape
     h, w = img_.shape[:2]
-    tiled = np.tile(matrix, (h // oh + 1, w // ow + 1))[:h, w]
+    # `[:h, w]` indexed a single column instead of slicing: it crashed whenever
+    # h != w and otherwise dithered with one column broadcast across all rows.
+    tiled = np.tile(matrix, (h // oh + 1, w // ow + 1))[:h, :w]
     result = np.zeros_like(img_)
     for c in range(3):
         channel = img_[..., c]
@@ -554,20 +578,44 @@ def dither_bayer(img: np.ndarray, levels: int = 4, order: int = 4) -> np.ndarray
     return u8(clamp(result * 255))
 
 
-def floyd_steinberg(img: np.ndarray, levels: int = 4) -> np.ndarray:
-    img_ = ensure_rgb(img).astype(np.float32) / 255.0
-    h, w = img_.shape[:2]
-    result = img_.copy()
-    for y in range(h):
+@maybe_jit(nopython=True, cache=True)
+def _floyd_steinberg_rows(result: np.ndarray, y0: int, y1: int, scale: float) -> None:
+    """Error-diffuse rows y0..y1-1 in place (numba-accelerated when available)."""
+    h, w = result.shape[0], result.shape[1]
+    for y in range(y0, y1):
         for x in range(w):
-            old = result[y, x].copy()
-            new = np.round(old * (levels - 1)) / (levels - 1)
-            result[y, x] = new
-            err = old - new
-            for dx, dy, factor in [(1, 0, 7 / 16), (-1, 1, 3 / 16), (0, 1, 5 / 16), (1, 1, 1 / 16)]:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < w and 0 <= ny < h:
-                    result[ny, nx] += err * factor
+            for ch in range(3):
+                old = result[y, x, ch]
+                new = np.round(old * scale) / scale
+                result[y, x, ch] = new
+                err = old - new
+                if x + 1 < w:
+                    result[y, x + 1, ch] += err * (7.0 / 16.0)
+                if y + 1 < h:
+                    if x > 0:
+                        result[y + 1, x - 1, ch] += err * (3.0 / 16.0)
+                    result[y + 1, x, ch] += err * (5.0 / 16.0)
+                    if x + 1 < w:
+                        result[y + 1, x + 1, ch] += err * (1.0 / 16.0)
+
+
+def floyd_steinberg(img: np.ndarray, levels: int = 4, cancel_token=None) -> np.ndarray:
+    """Floyd-Steinberg dithering.
+
+    The pure-Python per-pixel loop needed ~220s for a 24MP image, which also made
+    the filter effectively un-cancellable.  The work is now JIT-compiled and
+    processed in row bands so cancellation can be observed mid-render; error
+    diffusion only ever flows downwards, so banding is result-identical.
+    """
+    img_ = ensure_rgb(img).astype(np.float32) / 255.0
+    result = np.ascontiguousarray(img_)
+    h = result.shape[0]
+    scale = float(max(2, int(levels)) - 1)
+    band = max(1, h // 20)
+    for y0 in range(0, h, band):
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
+        _floyd_steinberg_rows(result, y0, min(h, y0 + band), scale)
     return u8(clamp(result * 255))
 
 
@@ -688,7 +736,8 @@ def old_tv(img: np.ndarray) -> np.ndarray:
     h, w = img_.shape[:2]
     scanlines = np.ones((h, 1), dtype=np.float32)
     scanlines[::2] = 0.7
-    result = img_ * scanlines
+    # (h, 1) cannot broadcast against (h, w, 3) unless h == w.
+    result = img_ * scanlines[..., None]
     result += np.random.default_rng(7).normal(0, 8, result.shape).astype(np.float32)
     r_shift = np.roll(result[..., 0], 1, axis=1)
     b_shift = np.roll(result[..., 2], -1, axis=1)

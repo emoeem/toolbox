@@ -223,6 +223,9 @@ def mirror_reflection(img: np.ndarray) -> np.ndarray:
     import cv2
     img_ = ensure_rgb(img)
     h, w = img_.shape[:2]
+    # h < 2 makes img_[:h // 2] empty, which cv2.flip/np.vstack handle inconsistently.
+    if h < 2:
+        return img_.copy()
     half_top = img_[:h // 2]
     half_bottom = cv2.flip(half_top, 0)
     result = np.vstack([half_top, half_bottom])
@@ -233,6 +236,8 @@ def dual_split(img: np.ndarray) -> np.ndarray:
     import cv2
     img_ = ensure_rgb(img)
     h, w = img_.shape[:2]
+    if w < 2:
+        return img_.copy()
     half_left = img_[:, :w // 2]
     half_right = cv2.flip(half_left, 1)
     result = np.hstack([half_left, half_right])
@@ -244,9 +249,14 @@ def kaleidoscope(img: np.ndarray, segments: int = 6) -> np.ndarray:
     img_ = ensure_rgb(img)
     h, w = img_.shape[:2]
     size = min(h, w)
+    if size < 2:
+        return img_.copy()
+    segments = max(2, int(segments))
     cx, cy = w // 2, h // 2
     cropped = img_[cy - size // 2:cy + size // 2, cx - size // 2:cx + size // 2]
-    seg_w = size // segments
+    # Without the clamp seg_w could be 0, producing empty strips that hstack and
+    # cv2.resize reject for small or heavily segmented images.
+    seg_w = max(1, size // segments)
     seg = cropped[:, :seg_w]
     flipped = cv2.flip(seg, 1)
     strip = np.hstack([seg, flipped])
@@ -302,6 +312,8 @@ def reduce_colors(img: np.ndarray, num_colors: int = 8) -> np.ndarray:
     import cv2
     img_ = ensure_rgb(img).astype(np.float32) / 255.0
     data = img_.reshape(-1, 3)
+    # kmeans requires at least as many samples as clusters.
+    num_colors = max(1, min(int(num_colors), data.shape[0]))
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
     compactness, labels, centers = cv2.kmeans(data, num_colors, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
     centers = np.clip(centers, 0, 1)

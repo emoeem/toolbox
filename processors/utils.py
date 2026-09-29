@@ -1,11 +1,43 @@
 from __future__ import annotations
 
 import io
+import os
+import tempfile
 from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
+
+
+def ensure_writable_dir(path: Path | str, fallback: Path | str | None = None) -> Path:
+    """Return `path` if it can actually be written to, else a usable fallback.
+
+    `mkdir(exist_ok=True)` succeeds on an existing *read-only* directory, so it
+    cannot be used to decide where caches/temp files should live.  Probing with a
+    real temp file is what catches read-only homes, containers and stale
+    `~/.cache` directories.
+    """
+    candidates = [Path(path)]
+    if fallback is not None:
+        candidates.append(Path(fallback))
+    candidates.append(Path(tempfile.gettempdir()) / "toolbox")
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        if not candidate.is_dir() or not os.access(candidate, os.W_OK):
+            continue
+        try:
+            fd, probe = tempfile.mkstemp(prefix=".wtest-", dir=candidate)
+            os.close(fd)
+            os.unlink(probe)
+            return candidate
+        except OSError:
+            continue
+    # Last resort: let the caller fail loudly rather than silently misbehave.
+    return Path(tempfile.gettempdir())
 
 
 SUPPORTED_READ = {

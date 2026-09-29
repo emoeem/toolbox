@@ -4,6 +4,7 @@ import hashlib
 import threading
 from typing import Any, Callable
 
+import cv2
 import numpy as np
 
 from processors.cancellation import CancelToken, CancelledError
@@ -15,23 +16,44 @@ _filter_chain_preview_cache: dict[str, np.ndarray] = {}
 _MAX_PREVIEW_CACHE = 8
 
 
-def preview_cache_key(image: np.ndarray, chain: FilterChain, max_side: int = 256) -> str:
+def downscale_preview(image: np.ndarray, max_side: int) -> np.ndarray:
+    h, w = image.shape[:2]
+    side = max(h, w)
+    if side <= max_side:
+        return image.copy()
+    ratio = max_side / side
+    new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
+    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
+def preview_cache_key(
+    image: np.ndarray,
+    chain: FilterChain,
+    max_side: int = 256,
+    image_generation: int = 0,
+) -> str:
     h, w = image.shape[:2]
     hw = f"{h}x{w}"
     chain_json = chain.to_json()
     h_src = hashlib.sha1(np.ascontiguousarray(image[::4, ::4]).tobytes()).hexdigest()[:16]
     h_chain = hashlib.sha1(chain_json.encode("utf-8")).hexdigest()[:16]
-    return f"{hw}_{h_src}_{h_chain}_m{max_side}"
+    return f"{hw}_g{image_generation}_{h_src}_{h_chain}_m{max_side}"
 
 
 def preview_cache_get(key: str) -> np.ndarray | None:
     with _cache_lock:
-        return _filter_chain_preview_cache.get(key)
+        v = _filter_chain_preview_cache.get(key)
+        if v is not None:
+            _filter_chain_preview_cache.pop(key)
+            _filter_chain_preview_cache[key] = v
+        return v
 
 
 def preview_cache_set(key: str, value: np.ndarray) -> None:
     with _cache_lock:
-        if len(_filter_chain_preview_cache) >= _MAX_PREVIEW_CACHE:
+        if key in _filter_chain_preview_cache:
+            _filter_chain_preview_cache.pop(key)
+        elif len(_filter_chain_preview_cache) >= _MAX_PREVIEW_CACHE:
             oldest = next(iter(_filter_chain_preview_cache))
             del _filter_chain_preview_cache[oldest]
         _filter_chain_preview_cache[key] = value
@@ -109,6 +131,7 @@ def run_filter_chain_sync(
 
 
 __all__ = [
+    "downscale_preview",
     "preview_cache_key",
     "preview_cache_get",
     "preview_cache_set",

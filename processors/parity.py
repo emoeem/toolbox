@@ -364,11 +364,18 @@ def photomosaic(target_path: str, tile_paths, output: str, columns=40, repeat_di
 def batch_rename(paths, pattern="{original}_{sequence}", start=1, padding=3, prefix="", suffix="") -> list[tuple[str, str]]:
     """Preview/execute a safe batch rename; supports common ImageToolbox-style tokens."""
     import datetime, re, uuid
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif',
+                  '.webp', '.avif', '.heic', '.heif', '.svg', '.ico', '.raw',
+                  '.cr2', '.nef', '.dng', '.arw', '.rw2', '.psd', '.eps',
+                  '.pdf', '.txt', '.json', '.csv', '.zip', '.tar', '.gz',
+                  '.mp4', '.mov', '.avi', '.webm', '.mkv', '.mp3', '.wav',
+                  '.ogg', '.flac', '.html', '.htm', '.css', '.js', '.py',
+                  '.md', '.rst'}
     files = [Path(p) for p in paths]
     result = []
     for i, p in enumerate(files, start=start):
         stat = p.stat()
-        stem, ext = p.stem, p.suffix
+        stem, ext = p.stem, p.suffix.lower()
         name = pattern
         tokens = {
             "{original}": stem, "{ext}": ext.lstrip("."), "{width}": "", "{height}": "",
@@ -378,7 +385,12 @@ def batch_rename(paths, pattern="{original}_{sequence}", start=1, padding=3, pre
         }
         for k, v in tokens.items(): name = name.replace(k, v)
         name = re.sub(r"\{sequence(?::(\d+))?\}", lambda m: str(i).zfill(int(m.group(1) or padding)), name)
-        result.append((str(p), str(p.with_name(name + (ext if "." not in Path(name).name else "")))))
+        new_suffix = Path(name).suffix.lower()
+        if new_suffix in IMAGE_EXTS or new_suffix == ext:
+            final_name = name
+        else:
+            final_name = name + ext
+        result.append((str(p), str(p.with_name(final_name))))
     return result
 
 
@@ -440,9 +452,9 @@ def jxl_convert(path: str, output: str, quality=90) -> str:
         if not exe:
             raise RuntimeError("JXL 后端不可用：当前优先使用 pillow-jxl-plugin；若仍失败，请安装系统 libjxl-tools。")
         if Path(exe).name=="cjxl":
-            subprocess.run([exe,path,output,"-q",str(quality)],check=True)
+            subprocess.run([exe,path,output,"-q",str(quality)],check=True,timeout=300)
         else:
-            subprocess.run([exe,path,output],check=True)
+            subprocess.run([exe,path,output],check=True,timeout=300)
         return output
 
 
