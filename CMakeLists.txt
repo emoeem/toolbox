@@ -40,7 +40,16 @@ qt_add_executable(toolbox
 
 # 跨目录 C++ include 走 tests/native 的同一约定：以 native/ 为唯一 include 根，
 # 源码里用路径限定写法（"models/tool_model.h"、"backend/ipc_protocol.h"）。
-target_include_directories(toolbox PRIVATE ${CMAKE_SOURCE_DIR}/native)
+# 额外列出各头文件目录：qt_add_qml_module 生成的 qmltyperegistrations.cpp 以
+# 裸文件名 include QML_ELEMENT 头（CI 实证），需要能直接解析到它们。
+target_include_directories(toolbox PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+    ${CMAKE_SOURCE_DIR}/native/app
+    ${CMAKE_SOURCE_DIR}/native/models
+    ${CMAKE_SOURCE_DIR}/native/services
+    ${CMAKE_SOURCE_DIR}/native/backend
+    ${CMAKE_SOURCE_DIR}/native/graphics
+)
 
 # QML 模块登记：与 ui/ 下的实际文件一一对应（ui/components/ 28 个基础/布局/业务
 # 组件 + Main + Theme 单例 + 8 个页面），qt_add_qml_module 按此清单编译进
