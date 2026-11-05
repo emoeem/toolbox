@@ -62,3 +62,40 @@ jobs:
         run: |
           pip install numba
           python -m unittest tests.test_fractal tests.test_filter_robustness tests.test_core -v
+
+  # Toolbox 2.0 native prototype (master plan Phase 2/3): Linux CI builds the
+  # C++/QML app and runs CTest. This is a Linux runner but NOT the target
+  # desktop acceptance — Wayland/GPU validation stays with the target env.
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      # Qt 6 dev packages from the distro match the CMake floor (6.4).
+      - name: Install Qt 6 dev packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev qt6-declarative-dev ninja-build clang-format clang-tidy
+
+      - name: Configure (CMake preset linux-ci)
+        run: cmake --preset linux-ci
+
+      - name: Build
+        run: cmake --build --preset linux-ci
+
+      - name: C++ format check
+        run: |
+          find native tests/native -name '*.h' -o -name '*.cpp' | \
+            xargs clang-format --dry-run --Werror
+
+      - name: C++ static analysis (advisory baseline)
+        run: |
+          clang-tidy -p build/linux-ci --quiet \
+            native/models/tool_model.cpp native/backend/ipc_protocol.cpp || true
+
+      - name: Tests (CTest)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --preset linux-ci

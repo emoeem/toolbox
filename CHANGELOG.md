@@ -1,5 +1,118 @@
 # Changelog
 
+## 2026-11-06 (Phase 1-3 — 设计系统、Qt Quick 原型与 Worker/IPC)
+
+依据总纲 `docs/toolbox-2.0-project-plan.md` 完成三个阶段的代码/文档工作。
+状态口径（总纲 §14.2）：本批全部为 **code_complete / static_reviewed**；
+Linux 目标环境验收见 `docs/phase2-acceptance.md`、`docs/phase3-acceptance.md`，
+未执行任何目标环境运行验证。
+
+### Phase 1（设计交付物，全部为文档）
+
+- `docs/ui-design-system.md`：设计令牌定稿（Catppuccin Mocha 深色 + 中性浅色、
+  Mauve 强调色的可访问浅色变体）、间距/圆角/字排/动效/布局常量、组件状态与
+  可访问性要求。
+- `docs/product-information-architecture.md`：导航树、页面清单与导航关系、
+  主窗口五区布局、P2 入口的诚实状态表达。
+- `docs/user-flows.md`：三条 P0 核心流程（单图编辑/滤镜处理/批量处理）+
+  共用异常路径。
+- `docs/ui-page-spec.md`：P0 四页与 P1 Studio 页的布局规格与状态定义。
+- `docs/ui-component-spec.md`：组件库 API 草案（基础/布局/业务三层）及与
+  IPC 动作的对接关系。
+- `docs/toolbox-2.0-project-plan.md`：总纲存档（附录 A 指定路径）。
+
+### Phase 2（C++ / Qt Quick 技术原型，code_complete）
+
+- 构建体系：根 `CMakeLists.txt`（Qt ≥ 6.4 下限 / C++20 / 预留 Phase 3 backend
+  源）+ `CMakePresets.json`（linux-debug / linux-release / linux-ci）。
+- C++：`native/app/`（main.cpp、Application QML 单例：导航/工具目录/页面路由/
+  版本信息）、`native/models/`（ToolModel + NavModel，QAbstractListModel +
+  QAbstractItemModelTester 契约测试）、`native/graphics/`（ImageCanvas：
+  QQuickItem + QSGSimpleTextureNode，滚轮指针锚定缩放/拖动平移/双击适配/
+  100%/图像空间棋盘格合成，纹理仅在 updatePaintNode 上传）。
+- QML：`ui/themes/Theme.qml`（与设计系统文档逐令牌对应的单例）、
+  `ui/Main.qml`（令牌驱动的应用壳 + Loader 路由）、`ui/components/AppSidebar.qml`
+  （P2 项禁用 + 阶段标注）、`ui/pages/`（Home/Editor 真实骨架；Batch/Fractal/
+  Shader/Texture/Planned 为诚实计划状态页；Settings 含可用的主题切换）。
+- 质量工具：`.clang-format`（Qt 风格）、`.clang-tidy`（保守基线）。
+- 测试：`tests/native/test_models.cpp`（模型契约 + QML 角色名锁定）。
+
+### Phase 3（Python Worker 与 IPC 垂直切片，code_complete）
+
+- 协议：`docs/ipc-protocol.md`（JSON Lines、消息形状、动作表、错误码、
+  握手/崩溃恢复/取消语义、版本策略、临时文件数据传递规则）。
+- Python 侧 `python_worker/`：`protocol.py`（编解码/校验/错误码）、
+  `task_runtime.py`（线程池 + queued/running/completed/failed/cancelling/cancelled
+  状态机 + 100ms 进度节流 + 复用 processors.cancellation.CancelToken）、
+  `dispatcher.py`（同步/异步动作表：worker.hello/shutdown、capabilities.list、
+  image.open/close/metadata/save、filter.list/preview/apply、task.cancel/query）、
+  `adapters/`（DocumentStore 文档表 + FilterDefRegistry/FilterChain 协议化，
+  import processors 仅发生在适配层）、`main.py`（stdin 主循环、双运行方式
+  bootstrap、信号优雅退出；stdout 只写协议消息，日志走 stderr）。
+- C++ 侧 `native/backend/`：`ipc_protocol.{h,cpp}`（消息构造/分类/校验/错误码）、
+  `python_worker.{h,cpp}`（QProcess + 行分帧 + stderr 尾部留档）、
+  `backend_manager.{h,cpp}`（握手超时 5s、崩溃检测与 ≤3 次自动重启、
+  Stopped 状态不误报崩溃、request_id 关联）。
+- 测试：`tests/test_worker_protocol.py`（编解码/分发/异步任务/取消/节流，
+  纯进程内、CI 可跑）、`tests/native/test_ipc_protocol.cpp`（消息形状锁定）。
+- CI：新增 `native` job（ubuntu + 发行版 Qt 6 开发包：CMake preset 构建、
+  clang-format 门禁、clang-tidy 咨询性检查、CTest）。
+
+### 已知限制（如实记录）
+
+- C++/QML 代码未在任何环境编译运行（Windows 侧无 Qt 工具链，按总纲 §15.3
+  不搭建）；编译期错误风险由 CI `native` job 兜底。
+- 垂直切片的 QML 交互接线（编辑器按钮直接调用 BackendManager）未实现——
+  Phase 3 验收允许以 C++ 测试驱动，QML 全面接线归 Phase 4。
+- Worker `image.open` 当前为同步动作（大图打开会占一个任务线程直至完成），
+  异步化列入 Phase 4 任务清单。
+
+## 2026-11-05 (Phase 0 — 字体系统修复与迁移基线)
+
+Toolbox 2.0 升级的 Phase 0（升级计划见 `docs/upgrade-plan.md`）：修复字体
+强制覆盖体系，建立 UI 迁移所需的架构文档与引擎行为基线。
+
+### Changed（字体系统）
+
+- **删除 QSS 全局字体强制**（`app/theme.py`）：浅色/深色两处
+  `* { font-family: "MiSans"...; font-size: 13px }` 移除。此前该规则覆盖
+  `QApplication.setFont()`，导致设置中的字体族与字号均不生效。
+- **删除启动时全目录字体扫描**（`app/fonts.py`）：`ensure_packaged_misans()`
+  每次启动对 `~/.local/share/fonts`、`/usr/share/fonts`、`~/.fonts` 递归
+  `rglob` 查找 MiSans 的逻辑整体移除。
+- **`app/fonts.py` 重写**：默认字体改为系统默认（空 family → 平台
+  fontconfig/平台解析），MiSans 不再硬编码为首选与默认值；等宽字体新增
+  `mono_font()`（候选链 Maple Mono/JetBrains Mono 等 → `QFont.Monospace`
+  hint 系统等宽回退），并新增诊断接口 `glyph_coverage()` /
+  `fallback_candidates()` / `diagnose()`（基于 QFontInfo/QRawFont，可查询
+  中文/英文/数字/符号/Emoji 的实际解析与回退，对应"字体最终解析结果可诊断"）。
+- **等宽字体设置真正生效**：Shader Studio 代码编辑器由硬编码
+  `QFont('Maple Mono',11)`（`app/panels/shader_studio.py`）改为接收
+  `mono_font(settings)` 解析结果。
+- **设置对话框**（`app/main_window.py`）：字体/等宽下拉框新增"(系统默认)"
+  项（存空值）；保存改用 `currentData()`，修复选中具体字体时误存显示文本的
+  隐患；"恢复默认"现在同时重置字体三项（此前遗漏字体）。
+
+### Fixed（测试）
+
+- `tests/test_fonts.py` 重写：删除"QSS 必须含 MiSans"的强制断言；改为断言
+  主题不强制字体族/字号/不含 MiSans，并新增系统默认解析、显式族应用、缺失
+  回退、等宽 hint/应用、五类字符覆盖与诊断结构的真实解析测试（无字体环境
+  自动 skip，兼容 CI 容器）。
+
+### Added（迁移基线）
+
+- `tools/make_test_samples.py`：4 张确定性测试样本（渐变/棋盘/噪声/合成，
+  固定参数与种子，不依赖外部图片）。
+- `tests/test_engine_baseline.py`：核心引擎行为基线 —— 样本哈希 + 42 个
+  core 算子输出 + save/load 往返的 sha256 对照（`TOOLBOX_REGEN_BASELINE=1`
+  重新生成；平台标签含 Python 版本与 numba 状态，环境不一致时 skip 不误报）。
+  首次在 Linux 虚拟机运行后提交 `tests/baselines/engine_baseline.json`。
+- `docs/architecture.md`：现状架构分析（MainWindow 上帝对象、4 种 processors
+  调用模式、线程/取消体系、撤销、持久化、已知隐患，全部带 file:line 证据）。
+- `docs/ui-migration-matrix.md`：全部 UI 功能 → 2.0 八大工具类 → 目标 Phase
+  的迁移矩阵，含外部依赖汇总与未实现功能真实状态标注。
+
 ## 2026-09-29 (第三轮 — 手工运行发现的崩溃)
 
 实际运行 `main.py` 时暴露的一批"点击才触发"的缺陷。这类问题不会被单元测试

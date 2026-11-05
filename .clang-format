@@ -1,0 +1,20 @@
+# Toolbox 2.0 C++ formatting (native/ + tests/native).
+# Qt-flavoured: 4-space indent, left-anchored pointers, attached braces.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Left
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+SortIncludes: CaseSensitive
+IncludeCategories:
+  - Regex: '^"'
+    Priority: 1
+  - Regex: '^<Q'
+    Priority: 2
+  - Regex: '^<'
+    Priority: 3
+InsertNewlineAtEOF: true
