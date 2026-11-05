@@ -7,7 +7,7 @@
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QUrl>
-#include <QtCore/QtLogging>
+#include <QtCore/qlogging.h>
 
 int main(int argc, char *argv[])
 {

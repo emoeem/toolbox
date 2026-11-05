@@ -3,7 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTimer>
-#include <QtCore/QtLogging>
+#include <QtCore/qlogging.h>
 
 #include "ipc_protocol.h"
 
