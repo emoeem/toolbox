@@ -2,9 +2,11 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Main window shell (Phase 2 prototype).
-// Phase 2 scope: token-driven shell, navigation rail, page routing, theme
-// switching. The editor toolbar, inspector and task panel arrive in Phase 4.
+// Main window shell (Phase 4): AppWorkspaceLayout as the workspace skeleton,
+// AppTopToolbar (identity + theme), AppStatusBar (live backend state + task
+// drawer trigger) and the AppTaskQueuePanel drawer above the status bar.
+// Page routing stays the Phase 2 Loader + Application.currentPage so pages
+// remain decoupled from shell internals.
 ApplicationWindow {
     id: window
 
@@ -13,94 +15,123 @@ ApplicationWindow {
     width: 1280
     height: 800
     visible: true
-    title: qsTr("Toolbox 2.0 — 原型")
+    title: qsTr("Toolbox 2.0")
     color: Theme.background
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
+    // Theme index of the persisted mode: dark=0 / light=1 / system=2.
+    function themeIndex() {
+        const mode = SettingsService.themeMode;
+        if (mode === "light")
+            return 1;
+        if (mode === "system")
+            return 2;
+        return 0;
+    }
 
-        AppSidebar {
-            Layout.fillHeight: true
+    // Theme.darkMode mirrors the persisted mode. The system branch is
+    // resolved to dark for now — following the OS palette needs a platform
+    // theme observer which is not wired yet (noted in the settings page too).
+    function applyTheme() {
+        Theme.darkMode = SettingsService.themeMode !== "light";
+        themeSelector.currentIndex = themeIndex();
+    }
+
+    Component.onCompleted: applyTheme()
+
+    Connections {
+        target: SettingsService
+        function onThemeModeChanged() { window.applyTheme() }
+    }
+
+    AppTopToolbar {
+        id: topBar
+
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+
+        Label {
+            text: qsTr("Toolbox 2.0")
+            font.pixelSize: Theme.fontSizeHeading
+            font.weight: Font.DemiBold
+            color: Theme.textPrimary
+            Layout.alignment: Qt.AlignVCenter
         }
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 0
+        contentRight: [
+            AppSegmentedControl {
+                id: themeSelector
 
-            // Minimal header: identity + theme switch (real, functional).
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: Theme.toolbarHeight
-                color: Theme.surface
+                model: [qsTr("深色"), qsTr("浅色"), qsTr("系统")]
+                Layout.alignment: Qt.AlignVCenter
 
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.spacingLg
-                    anchors.rightMargin: Theme.spacingLg
-
-                    Label {
-                        text: qsTr("Toolbox 2.0")
-                        font.pixelSize: Theme.fontSizeHeading
-                        font.weight: Font.DemiBold
-                        color: Theme.textPrimary
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Label {
-                        text: qsTr("Phase 2 技术原型 · 处理引擎未接入（Phase 3）")
-                        font.pixelSize: Theme.fontSizeSmall
-                        color: Theme.textSecondary
-                    }
-
-                    Button {
-                        id: themeButton
-                        text: Theme.darkMode ? qsTr("浅色主题") : qsTr("深色主题")
-                        onClicked: Theme.darkMode = !Theme.darkMode
-                    }
-                }
-
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                    height: 1
-                    color: Theme.border
+                onActivated: (index) => {
+                    const mode = index === 1 ? "light" : index === 2 ? "system" : "dark";
+                    SettingsService.themeMode = mode;  // normalized + persisted by the service
+                    window.applyTheme();
                 }
             }
+        ]
+    }
 
-            // Page router. Pages are same-module types; Loader keeps pages
-            // independent so navigation stays decoupled from page internals.
-            Loader {
-                id: pageLoader
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                source: Application.currentPage
-            }
+    // Workspace skeleton: Ready state hosts the routed page; the four generic
+    // states belong to the pages themselves (ui-page-spec.md §6).
+    AppWorkspaceLayout {
+        id: workspace
 
-            // StatusBar placeholder uses real tokens; live data lands in Phase 4.
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: Theme.statusBarHeight
-                color: Theme.surface
+        anchors.top: topBar.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: statusBar.top
 
-                Label {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.spacingLg
-                    text: qsTr("就绪 · 任务队列 Phase 3 接入")
-                    font.pixelSize: Theme.fontSizeSmall
-                    color: Theme.textSecondary
-                }
+        Loader {
+            id: pageLoader
+            anchors.fill: parent
+            source: Application.currentPage
+        }
+    }
 
-                Rectangle {
-                    anchors.top: parent.top
-                    width: parent.width
-                    height: 1
-                    color: Theme.border
-                }
+    // Live worker state (BackendManager::state string) on the left; the task
+    // drawer trigger on the right (ui-component-spec.md §2 StatusBar).
+    AppStatusBar {
+        id: statusBar
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        leftText: qsTr("后端 %1").arg(backendStateLabel())
+
+        function backendStateLabel() {
+            switch (Application.backend.state) {
+            case "idle": return qsTr("未启动");
+            case "starting": return qsTr("启动中");
+            case "handshaking": return qsTr("握手中");
+            case "ready": return qsTr("就绪");
+            case "crashed": return qsTr("已崩溃");
+            case "stopped": return qsTr("已停止");
+            default: return Application.backend.state;
             }
         }
+
+        AppButton {
+            kind: AppButton.Kind.Ghost
+            size: AppButton.Size.Small
+            text: taskPanel.count > 0 ? qsTr("任务 · %1").arg(taskPanel.count) : qsTr("任务")
+            onClicked: taskPanel.expanded = !taskPanel.expanded
+        }
+    }
+
+    // Bottom task drawer, revealed by the status-bar 任务 button. Hidden
+    // entirely while collapsed — the drawer's own chevron collapses it back
+    // to invisible; the status bar button reopens it.
+    AppTaskQueuePanel {
+        id: taskPanel
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: statusBar.top
+        z: 1
+        visible: expanded
+        model: Application.taskModel
     }
 }

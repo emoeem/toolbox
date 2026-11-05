@@ -9,6 +9,12 @@ namespace toolbox {
 Application::Application(QObject *parent)
     : QObject(parent)
 {
+    // Both services register themselves as the process-wide singleton, so a
+    // later QML-side SettingsService/FontService lookup returns this object.
+    m_settingsService = SettingsService::instance();
+    m_fontService = FontService::instance();
+    // Worker-driven task rows follow the same BackendManager the UI calls.
+    m_taskModel.setBackend(&m_backend);
     buildCatalog();
     // Phase 2 default landing page; HomePage becomes the entry once it has
     // real content in Phase 4.
@@ -42,6 +48,20 @@ void Application::navigate(const QString &pageId)
     const auto page = m_navModel.pageForId(pageId);
     if (!page.isEmpty())
         setCurrentPage(page);
+}
+
+void Application::startBackend()
+{
+    // Configure + start from the SettingsService backend/* keys. The settings
+    // UI (SettingsPage) writes the typed backendPython/backendRepoRoot
+    // properties, and SettingsService::load() persists defaults for missing
+    // keys, so both keys always exist here; incomplete configuration surfaces
+    // as BackendManager::errorOccurred(WORKER_START_FAILED) from start(),
+    // matching the startBackend() docs in application.h.
+    const QString python = m_settingsService->value(QStringLiteral("backend/python")).toString();
+    const QString repoRoot = m_settingsService->value(QStringLiteral("backend/repoRoot")).toString();
+    m_backend.configure(python, repoRoot, {}, m_settingsService->concurrentTasks());
+    m_backend.start();
 }
 
 void Application::buildCatalog()

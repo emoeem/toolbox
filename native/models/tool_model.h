@@ -44,6 +44,11 @@ public:
     Q_INVOKABLE int indexOfId(const QString &id) const;
     Q_INVOKABLE QVariantMap get(int row) const;
 
+    // Case-insensitive containment match over title/keywords/category, in
+    // catalog order, capped at limit; each hit is returned as get(row).
+    // An empty query or a non-positive limit yields no results.
+    Q_INVOKABLE QVariantList search(const QString &query, int limit = 20) const;
+
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;

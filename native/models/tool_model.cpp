@@ -33,6 +33,22 @@ QVariantMap ToolModel::get(int row) const
     return map;
 }
 
+QVariantList ToolModel::search(const QString &query, int limit) const
+{
+    QVariantList results;
+    if (query.isEmpty() || limit <= 0)
+        return results;
+    for (int row = 0; row < m_entries.size() && results.size() < limit; ++row) {
+        const auto &entry = m_entries.at(row);
+        if (entry.title.contains(query, Qt::CaseInsensitive)
+                || entry.keywords.contains(query, Qt::CaseInsensitive)
+                || entry.category.contains(query, Qt::CaseInsensitive)) {
+            results.append(get(row));
+        }
+    }
+    return results;
+}
+
 int ToolModel::rowCount(const QModelIndex &parent) const
 {
     return parent.isValid() ? 0 : m_entries.size();

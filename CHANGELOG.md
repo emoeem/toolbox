@@ -1,5 +1,93 @@
 # Changelog
 
+## 2026-11-06 (Phase 4 — 新 UI 基础设施与应用壳)
+
+依据总纲 `docs/toolbox-2.0-project-plan.md` Phase 4 任务清单完成：统一 UI
+系统、基础组件库、设置/字体服务与任务队列。状态口径（总纲 §14.2）：本批
+全部为 **code_complete / static_reviewed**；Linux 目标环境验收清单见
+`docs/phase4-acceptance.md`，其中"任务面板随 Worker 事件更新"在 Worker 未
+接入前如实标注 **Phase 3 验收后可验**，未执行任何目标环境运行验证。
+
+### Added（C++ 服务与模型）
+
+- `native/services/settings_service.{h,cpp}`：QSettings("Emo","Toolbox2")
+  扁平键值外观（QML 单例）。键位与默认值见头文件键表：主题模式
+  dark/light/system（默认 system，非法值归一化）、布局持久化
+  layout/navExpanded 与 layout/inspectorCollapsed、字体 font/family 与
+  font/mono 与 font/size（默认 11，镜像 app/fonts.py resolve_size）、
+  preview/quality、tasks/concurrent、backend/python 与 backend/repoRoot
+  （`Application::startBackend()` 经 value() 读取）。每次写入后 sync()；
+  `addRecentFile` 最近文件去重置顶、上限 10；`resetLayout` 仅复位布局组；
+  破损存储值回落默认而不传播。
+- `native/services/font_service.{h,cpp}`：字体角色解析与诊断（QML 单例），
+  镜像 app/fonts.py 语义——空族=平台默认、UI 走 SansSerif+抗锯齿+完全
+  hinting、等宽走 Monospace hint；`resolveFamily` 候选链回退（sans/mono
+  候选链内置于服务，与设置页共享）；`applyToApplication` 全局应用字号
+  （非正值回落 11）；`diagnose` 返回 ui/mono 两段的 requested/resolved/
+  size/coverage/fallback，coverage 固定五类（latin/digit/cjk/symbol/
+  emoji），未覆盖类给出 ≤8 项回退族。
+- `native/models/task_model.{h,cpp}`：Worker 驱动的任务行模型
+  （QAbstractListModel）。trackRequest 记录 request_id→任务名；成功响应
+  携带 result.task_id 建行（未跟踪/失败/同步响应不建行）；task.progress
+  更新进度（夹取 0-100）；task.completed / task.failed 终态，CANCELLED
+  呈现为 cancelled 而非 failed；cancelTask 将活跃行置 cancelling 并转发
+  BackendManager，终态行本地拒绝（协议 §7）；终态行保留上限 64、FIFO
+  裁剪且永不裁剪活跃行。角色名 taskTaskId/taskName/taskStatus/
+  taskProgress/taskError 与 AppTaskItem.qml 契约一致。
+- `Application` 扩展：暴露 taskModel/settingsService/fontService 属性与
+  `startBackend()`（从 SettingsService 读取 backend/* 后配置并启动
+  BackendManager）。
+
+### Added（QML 组件库与应用壳接线）
+
+- `ui/components/` 28 个 App 前缀组件（基础/布局/业务三层，全部仅引用
+  Theme 令牌）：AppButton、AppIconButton、AppToolButton、AppTextField、
+  AppNumberField、AppSliderField、AppSelectField、AppColorField、
+  AppToggleField、AppSegmentedControl、AppSearchField、AppTooltip、
+  AppContextMenu、AppDialog、AppToast、AppProgressIndicator、
+  AppPanelHeader、AppSectionGroup、AppInspectorPanel、AppSidebar、
+  AppTopToolbar、AppStatusBar、AppWorkspaceLayout、AppTaskItem、
+  AppTaskQueuePanel、AppHistoryItem、AppImageThumbnail、
+  AppToolCatalogItem。
+- `ui/Main.qml`：SettingsService.themeMode 驱动 Theme.darkMode；状态栏
+  实时显示 BackendManager 状态；AppTaskQueuePanel 底部抽屉绑定
+  Application.taskModel。
+- `ui/pages/SettingsPage.qml`：外观（主题三态、字体族/字号、字体诊断）、
+  工作区（布局持久化状态 + 重置布局）、后端（python/repoRoot 配置、
+  启动按钮、Worker 状态）四个分区真实读写服务；HomePage 接入
+  SettingsService.recentFiles 最近文件（只读展示）。
+
+### Added（测试）
+
+- `tests/native/test_task_model.cpp`：以真实 BackendManager（不启动
+  Worker）直接 emit responseReady/taskEvent 信号模拟协议事件，覆盖建行
+  条件、进度夹取、终态/取消呈现、cancelTask 转发与终态拒绝、64 条终结
+  保留上限与活跃行保护；角色名断言锁定 QML 契约。
+- `tests/native/test_settings_service.cpp`：QTemporaryDir 隔离 store 的
+  默认值、读写往返、信号去重、破损存储回落、主题归一化、addRecentFile
+  空值/去重/上限 10、resetLayout 仅动布局组。
+- `tests/native/test_font_service.cpp`：resolveFamily 候选链回退（无字体
+  环境 QSKIP，镜像 tests/test_fonts.py 口径）、diagnose ui/mono 五类覆盖
+  键结构与回退列表上限、非正字号回落 11、applyToApplication 全局应用。
+- `tests/native/CMakeLists.txt` 注册 task_model / settings_service /
+  font_service 三个 CTest 目标（与既有两目标同一模式：被测源文件直接
+  编入测试目标）。
+
+### Added（文档）
+
+- `docs/phase4-acceptance.md`：Linux 目标环境验收清单（构建、CTest 全绿、
+  GUI 启动、主题/字体设置真实生效、布局持久化、任务面板随 Worker 事件
+  更新——Worker 未接前如实标注 Phase 3 验收后可验）。
+
+### 已知限制（如实记录）
+
+- 任务面板行更新在真实操作流中不可验：UI 内尚无发起异步动作的入口，
+  端到端复核依赖 Phase 3 垂直切片可用，接线随 Phase 5 文件工作流完成。
+- AppSidebar/AppInspectorPanel 尚未读写 layout/* 键（折叠交互随对应
+  工作区页面交付），本阶段布局持久化以 store 往返与设置页读写为准。
+- 设置测试的 store 隔离依赖 Linux 原生格式为 INI（QSettings::setPath
+  重定向）；Windows 原生格式为注册表，重定向不生效。
+
 ## 2026-11-06 (Phase 1-3 — 设计系统、Qt Quick 原型与 Worker/IPC)
 
 依据总纲 `docs/toolbox-2.0-project-plan.md` 完成三个阶段的代码/文档工作。

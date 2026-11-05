@@ -3,9 +3,14 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 
-// Editor workspace (Phase 2 prototype): open + display + zoom/pan.
-// Processing, preview pipeline and history arrive via the Python Worker in
-// Phase 3+; the inspector is intentionally absent until then.
+// Editor workspace (Phase 2 prototype with Phase 4 componentization): open +
+// display + zoom/pan. Processing, preview pipeline and history arrive via the
+// Python Worker in Phase 3+; the inspector is intentionally absent until then.
+//
+// This page keeps its Phase 2 behavior — the Phase 4 pass only swaps the tool
+// row onto the shared component set (AppButton / AppToolButton /
+// AppTopToolbar.GroupRule / AppProgressIndicator / AppStatusBar). Backend
+// launching lives on the settings page, not here.
 Page {
     id: page
 
@@ -33,17 +38,38 @@ Page {
                 anchors.rightMargin: Theme.spacingMd
                 spacing: Theme.spacingSm
 
-                Button {
+                AppButton {
+                    kind: AppButton.Kind.Primary
                     text: qsTr("打开")
                     onClicked: fileDialog.open()
                 }
 
-                ToolSeparator {}
+                AppTopToolbar.GroupRule { Layout.alignment: Qt.AlignVCenter }
 
-                Button { text: qsTr("−"); onClicked: canvas.zoomBy(1 / 1.25) }
-                Button { text: qsTr("+"); onClicked: canvas.zoomBy(1.25) }
-                Button { text: qsTr("适配"); onClicked: canvas.fitToWindow() }
-                Button { text: qsTr("100%"); onClicked: canvas.setActualSize() }
+                AppToolButton {
+                    display: AbstractButton.TextOnly
+                    text: qsTr("−")
+                    tooltipText: qsTr("缩小")
+                    onClicked: canvas.zoomBy(1 / 1.25)
+                }
+                AppToolButton {
+                    display: AbstractButton.TextOnly
+                    text: qsTr("+")
+                    tooltipText: qsTr("放大")
+                    onClicked: canvas.zoomBy(1.25)
+                }
+                AppToolButton {
+                    display: AbstractButton.TextOnly
+                    text: qsTr("适配")
+                    tooltipText: qsTr("适配窗口")
+                    onClicked: canvas.fitToWindow()
+                }
+                AppToolButton {
+                    display: AbstractButton.TextOnly
+                    text: qsTr("100%")
+                    tooltipText: qsTr("实际大小")
+                    onClicked: canvas.setActualSize()
+                }
 
                 Label {
                     text: canvas.zoom >= 0.01
@@ -53,7 +79,7 @@ Page {
                     color: Theme.textPrimary
                 }
 
-                ToolSeparator {}
+                AppTopToolbar.GroupRule { Layout.alignment: Qt.AlignVCenter }
 
                 Label {
                     id: errorLabel
@@ -64,11 +90,11 @@ Page {
                     elide: Text.ElideRight
                 }
 
-                BusyIndicator {
+                AppProgressIndicator {
+                    form: AppProgressIndicator.Form.Inline
+                    indeterminate: true
                     visible: canvas.busy
-                    running: canvas.busy
-                    width: 24
-                    height: 24
+                    Layout.alignment: Qt.AlignVCenter
                 }
             }
 
@@ -119,32 +145,17 @@ Page {
             }
         }
 
-        Rectangle {
+        // Bottom info bar (document size / mouse position) on the shared
+        // status-bar component instead of a hand-rolled Rectangle.
+        AppStatusBar {
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.statusBarHeight
-            color: Theme.surface
-
-            Label {
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.spacingLg
-                text: {
-                    if (canvas.imageSize.isEmpty)
-                        return qsTr("未打开图像")
-                    return canvas.imageSize.width + "×" + canvas.imageSize.height
-                           + " · " + qsTr("鼠标") + " "
-                           + Math.max(0, Math.floor(canvas.mousePosition.x)) + ","
-                           + Math.max(0, Math.floor(canvas.mousePosition.y))
-                }
-                font.pixelSize: Theme.fontSizeSmall
-                color: Theme.textSecondary
-            }
-
-            Rectangle {
-                anchors.top: parent.top
-                width: parent.width
-                height: 1
-                color: Theme.border
+            leftText: {
+                if (canvas.imageSize.isEmpty)
+                    return qsTr("未打开图像")
+                return canvas.imageSize.width + "×" + canvas.imageSize.height
+                       + " · " + qsTr("鼠标") + " "
+                       + Math.max(0, Math.floor(canvas.mousePosition.x)) + ","
+                       + Math.max(0, Math.floor(canvas.mousePosition.y))
             }
         }
     }
