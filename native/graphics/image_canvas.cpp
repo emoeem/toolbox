@@ -4,6 +4,7 @@
 #include <QDropEvent>
 #include <QHoverEvent>
 #include <QImageReader>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QQuickWindow>

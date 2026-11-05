@@ -1,5 +1,7 @@
 #include "backend_manager.h"
 
+#include "ipc_protocol.h"
+
 #include <QDir>
 #include <QFileInfo>
 
@@ -59,11 +61,13 @@ QString BackendManager::state() const
     return QStringLiteral("unknown");
 }
 
-void BackendManager::setState(State state)
+void BackendManager::setState(State newState)
 {
-    if (m_state == state)
+    if (m_state == newState)
         return;
-    m_state = state;
+    m_state = newState;
+    // 参数名不能叫 state：会遮蔽同名成员函数（CI 实证 'state' cannot be
+    // used as a function）。state() 此处读回刚写入的 m_state，转成字符串。
     emit stateChanged(state());
 }
 
