@@ -50,7 +50,7 @@ class SettingsService : public QObject {
     // Backend launcher paths (Phase 4 settings page). Both share one NOTIFY:
     // they change together from the same form and no consumer needs to tell
     // them apart. Keys are exactly the ones Application::startBackend() reads
-    // via value() (application.cpp:58-59), so a write here is immediately
+    // via value(), so a write here is immediately
     // visible to the next start.
     Q_PROPERTY(
         QString backendPython READ backendPython WRITE setBackendPython NOTIFY backendChanged)

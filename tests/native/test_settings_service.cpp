@@ -110,7 +110,8 @@ void TestSettingsService::writeReadRoundTripPersists() {
     writer.addRecentFile(QStringLiteral("/tmp/a.png"));
     writer.addRecentFile(QStringLiteral("/tmp/b.png"));
 
-    // Every write is followed by sync() (settings_service.h:20-21), so a fresh
+    // Every setter is followed by sync() (see the setters in
+    // settings_service.cpp), so a fresh
     // instance reads exactly what the first persisted.
     const SettingsService reader;
     QCOMPARE(reader.themeMode(), QStringLiteral("light"));

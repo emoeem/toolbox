@@ -8,6 +8,18 @@
 `docs/phase4-acceptance.md`，其中"任务面板随 Worker 事件更新"在 Worker 未
 接入前如实标注 **Phase 3 验收后可验**，未执行任何目标环境运行验证。
 
+> **CI 状态更新（同日后续）**：`phase4-ui-infra` 分支已达 **双 job 全绿**
+> （test：307 Python 测试 + ruff；native：Build 零错误 + CTest 5/5 +
+> clang-format 通过）。过程中 CI 实证修复：5 处编译错误（头文件路径、const
+> 正确性、qmltyperegistrations include）、2 处运行期模型缺陷（TaskModel 空
+> 变化发射、SettingsService 测试隔离失效——`setPath(IniFormat)` 不影响
+> NativeFormat 实例，已改为显式 IniFormat 构造）、3 个 low 评审发现（mono
+> 候选链补齐、Ctrl+Q 快捷键、NumberField 悬停穿透）。另：旧测试套件退出期
+> heap corruption 经 gdb 与 main 对照组证实为 **main 既有缺陷**，以
+> tearDownModule 收集 + CI 端 os._exit 绕过处理；CI 增设 clang-format
+> 自动格式化机器人（PointerAlignment 修正为 Right）。Linux 实机 GUI 验收
+> 仍待 `docs/phase4-acceptance.md` 执行。
+
 ### Added（C++ 服务与模型）
 
 - `native/services/settings_service.{h,cpp}`：QSettings("Emo","Toolbox2")

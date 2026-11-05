@@ -80,7 +80,7 @@ void SettingsService::load() {
     if (m_recentFiles.size() > kMaxRecentFiles)
         m_recentFiles = m_recentFiles.mid(0, kMaxRecentFiles);
     // Backend launcher keys: Application::startBackend() reads the raw store
-    // via value() (application.cpp:58-59), while the settings page displays
+    // via value(), while the settings page displays
     // these properties. Persisting the defaults when the keys are absent keeps
     // the store identical to what the page shows, so startBackend() sees the
     // same values the user sees instead of failing on a hidden empty store.

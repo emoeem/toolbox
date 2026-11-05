@@ -3,7 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // Task row (ui-component-spec.md §3 TaskItem) bound to the TaskModel roles —
-// exact roleNames from native/models/task_model.cpp:173-182, declared as
+// exact roleNames from TaskModel::roleNames (native/models/task_model.cpp),
+// declared as
 // required properties so ListView { model: Application.taskModel } wires the
 // delegate automatically:
 //   taskTaskId (string) / taskName (string) / taskStatus (string:
