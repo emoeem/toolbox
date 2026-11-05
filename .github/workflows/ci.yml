@@ -57,7 +57,7 @@ jobs:
 
       # 诊断（临时）：全量套件在退出期出现 heap corruption（exit 134），
       # 单独运行首个新增 Qt 测试模块以定位引入者。定位后移除本步骤。
-      - name: Diagnose: test_fonts in isolation
+      - name: "Diagnose: test_fonts in isolation"
         if: always()
         run: |
           QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts -v > /tmp/fonts_iso.log 2>&1 || true
