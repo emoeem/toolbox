@@ -113,11 +113,11 @@ jobs:
         run: |
           git fetch origin main --depth=1
           git worktree add /tmp/main-check origin/main
-          for combo in "tests.test_fonts tests.test_task_and_history tests.test_workbench" "tests.test_task_and_history tests.test_workbench"; do
+          for combo in "tests.test_task_and_history tests.test_workbench"; do
             echo "=== main: $combo ==="
             cd /tmp/main-check
             PYTHONPATH=/tmp/main-check QT_QPA_PLATFORM=offscreen python -m unittest $combo -v > /tmp/diagM.log 2>&1 || true
-            tail -5 /tmp/diagM.log
+            tail -25 /tmp/diagM.log
             cd "$GITHUB_WORKSPACE"
           done
 
