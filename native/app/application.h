@@ -37,10 +37,12 @@ public:
 
     static Application *create(QQmlEngine *qmlEngine, QJSEngine *jsEngine);
 
-    NavModel *navModel() const { return &m_navModel; }
-    ToolModel *toolModel() const { return &m_toolModel; }
-    TaskModel *taskModel() const { return &m_taskModel; }
-    BackendManager *backend() const { return &m_backend; }
+    // 返回成员地址的访问器不能是 const 成员函数：const 上下文中 &m_x 得到
+    // const 指针（CI 实证 -fpermissive 拒绝）。Q_PROPERTY READ 不要求 const。
+    NavModel *navModel() { return &m_navModel; }
+    ToolModel *toolModel() { return &m_toolModel; }
+    TaskModel *taskModel() { return &m_taskModel; }
+    BackendManager *backend() { return &m_backend; }
     SettingsService *settingsService() const { return m_settingsService; }
     FontService *fontService() const { return m_fontService; }
     QUrl currentPage() const { return m_currentPage; }
