@@ -1,11 +1,15 @@
 # Toolbox 2.0 C++ formatting (native/ + tests/native).
-# Qt-flavoured: 4-space indent, left-anchored pointers, attached braces.
+# Qt-flavoured: 4-space indent, Qt-style pointers (Type *x = PointerAlignment
+# Right), attached braces for statements; class/namespace bodies keep their
+# opening brace on the next line via BreakBeforeBraces: Allman? — no: Attach
+# here means statements attach; class braces follow the same rule, so the
+# formatter decides mechanically. Code style is whatever this file produces.
 BasedOnStyle: LLVM
 Language: Cpp
 Standard: c++20
 IndentWidth: 4
 ColumnLimit: 100
-PointerAlignment: Left
+PointerAlignment: Right
 BreakBeforeBraces: Attach
 AllowShortFunctionsOnASingleLine: Inline
 AllowShortIfStatementsOnASingleLine: Never

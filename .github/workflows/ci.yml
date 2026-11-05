@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -102,6 +102,19 @@ jobs:
 
       - name: Configure (CMake preset linux-ci)
         run: cmake --preset linux-ci
+
+      # 格式化 bot：CI 里的 clang-format 直接落地格式修正并回推分支，
+      # 免去在无本地工具链的环境手工对齐；下一轮起格式检查恒绿。
+      - name: Apply clang-format (auto-fix, push back)
+        run: |
+          find native tests/native -name '*.h' -o -name '*.cpp' | xargs clang-format -i
+          if ! git diff --quiet; then
+            git config user.name "toolbox-ci"
+            git config user.email "toolbox-ci@users.noreply.github.com"
+            git add native tests/native
+            git commit -m "style: clang-format 自动整理（CI 格式化机器人）"
+            git push
+          fi
 
       - name: Build
         run: cmake --build --preset linux-ci
