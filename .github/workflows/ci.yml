@@ -102,7 +102,12 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends gdb > /dev/null 2>&1
           QT_QPA_PLATFORM=offscreen gdb -q -batch -ex run -ex "bt 25" --args python -m unittest tests.test_fonts tests.test_task_and_history tests.test_workbench > /tmp/diagG.log 2>&1 || true
-          grep -A28 "SIGABRT\|Program received" /tmp/diagG.log | head -35
+          tail -40 /tmp/diagG.log
+      - name: "Diagnose: faulthandler + PYTHONMALLOC=debug on crashing combo"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen PYTHONMALLOC=debug python -X faulthandler -m unittest tests.test_fonts tests.test_task_and_history tests.test_workbench > /tmp/diagF.log 2>&1 || true
+          grep -B2 -A25 "Fatal Python error\|Current thread" /tmp/diagF.log | head -45 || tail -20 /tmp/diagF.log
 
       # ...and cover the accelerated paths as well.
       - name: Tests (numba JIT paths)
