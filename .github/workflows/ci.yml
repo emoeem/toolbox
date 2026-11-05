@@ -56,12 +56,17 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       # 诊断（临时）：全量套件在退出期出现 heap corruption（exit 134），
-      # 单独运行首个新增 Qt 测试模块以定位引入者。定位后移除本步骤。
-      - name: "Diagnose: test_fonts in isolation"
+      # test_fonts 单独运行已排除。以下二分定位引入组合，定位后移除。
+      - name: "Diagnose: new test modules together"
         if: always()
         run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts -v > /tmp/fonts_iso.log 2>&1 || true
-          tail -6 /tmp/fonts_iso.log
+          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_worker_protocol tests.test_engine_baseline -v > /tmp/diag1.log 2>&1 || true
+          tail -6 /tmp/diag1.log
+      - name: "Diagnose: fonts + main_window_static"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_main_window_static -v > /tmp/diag2.log 2>&1 || true
+          tail -6 /tmp/diag2.log
 
       # ...and cover the accelerated paths as well.
       - name: Tests (numba JIT paths)
