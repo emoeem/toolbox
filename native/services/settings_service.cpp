@@ -10,8 +10,7 @@ namespace {
 
 // Stored value that is neither "dark" nor "light" (any case) is normalized to
 // the canonical "system", keeping the themeMode invariant from the header.
-QString normalizeThemeMode(const QString &mode)
-{
+QString normalizeThemeMode(const QString &mode) {
     if (mode.compare(QStringLiteral("dark"), Qt::CaseInsensitive) == 0)
         return QStringLiteral("dark");
     if (mode.compare(QStringLiteral("light"), Qt::CaseInsensitive) == 0)
@@ -21,59 +20,56 @@ QString normalizeThemeMode(const QString &mode)
 
 // Mirrors app/fonts.py resolve_size (42-46): an unreadable stored value falls
 // back to the default instead of propagating a bogus number.
-int readInt(const QVariant &value, int fallback)
-{
+int readInt(const QVariant &value, int fallback) {
     bool ok = false;
     const int result = value.toInt(&ok);
     return ok ? result : fallback;
 }
 
-SettingsService *s_instance = nullptr;  // process-wide singleton identity
+SettingsService *s_instance = nullptr; // process-wide singleton identity
 
 } // namespace
 
 SettingsService::SettingsService(QObject *parent)
-    : QObject(parent)
-    , m_settings(QStringLiteral("Emo"), QStringLiteral("Toolbox2"))
-{
+    : QObject(parent), m_settings(QStringLiteral("Emo"), QStringLiteral("Toolbox2")) {
     load();
 }
 
-SettingsService::~SettingsService()
-{
+SettingsService::~SettingsService() {
     if (s_instance == this)
         s_instance = nullptr;
 }
 
-SettingsService *SettingsService::instance()
-{
+SettingsService *SettingsService::instance() {
     if (!s_instance)
         s_instance = new SettingsService();
     return s_instance;
 }
 
-SettingsService *SettingsService::create(QQmlEngine *qmlEngine, QJSEngine *jsEngine)
-{
+SettingsService *SettingsService::create(QQmlEngine *qmlEngine, QJSEngine *jsEngine) {
     // The instance must outlive the engine bindings; ownership stays with QML.
     Q_UNUSED(qmlEngine);
     Q_UNUSED(jsEngine);
     return instance();
 }
 
-void SettingsService::load()
-{
+void SettingsService::load() {
     m_themeMode = normalizeThemeMode(
-        m_settings.value(QStringLiteral("appearance/themeMode"), QStringLiteral("system")).toString());
+        m_settings.value(QStringLiteral("appearance/themeMode"), QStringLiteral("system"))
+            .toString());
     m_navExpanded = m_settings.value(QStringLiteral("layout/navExpanded"), false).toBool();
-    m_inspectorCollapsed = m_settings.value(QStringLiteral("layout/inspectorCollapsed"), false).toBool();
+    m_inspectorCollapsed =
+        m_settings.value(QStringLiteral("layout/inspectorCollapsed"), false).toBool();
     m_uiFontFamily = m_settings.value(QStringLiteral("font/family"), QString()).toString();
     m_monoFontFamily = m_settings.value(QStringLiteral("font/mono"), QString()).toString();
-    m_uiFontSize = readInt(m_settings.value(QStringLiteral("font/size"), kDefaultFontSize),
-                           kDefaultFontSize);
-    m_previewQuality = readInt(m_settings.value(QStringLiteral("preview/quality"), kDefaultPreviewQuality),
-                               kDefaultPreviewQuality);
-    m_concurrentTasks = readInt(m_settings.value(QStringLiteral("tasks/concurrent"), kDefaultConcurrentTasks),
-                                kDefaultConcurrentTasks);
+    m_uiFontSize =
+        readInt(m_settings.value(QStringLiteral("font/size"), kDefaultFontSize), kDefaultFontSize);
+    m_previewQuality =
+        readInt(m_settings.value(QStringLiteral("preview/quality"), kDefaultPreviewQuality),
+                kDefaultPreviewQuality);
+    m_concurrentTasks =
+        readInt(m_settings.value(QStringLiteral("tasks/concurrent"), kDefaultConcurrentTasks),
+                kDefaultConcurrentTasks);
     m_recentFiles = m_settings.value(QStringLiteral("files/recent"), QStringList()).toStringList();
     if (m_recentFiles.size() > kMaxRecentFiles)
         m_recentFiles = m_recentFiles.mid(0, kMaxRecentFiles);
@@ -82,7 +78,8 @@ void SettingsService::load()
     // these properties. Persisting the defaults when the keys are absent keeps
     // the store identical to what the page shows, so startBackend() sees the
     // same values the user sees instead of failing on a hidden empty store.
-    m_backendPython = m_settings.value(QStringLiteral("backend/python"), QStringLiteral("python3")).toString();
+    m_backendPython =
+        m_settings.value(QStringLiteral("backend/python"), QStringLiteral("python3")).toString();
     m_backendRepoRoot = m_settings.value(QStringLiteral("backend/repoRoot"), QString()).toString();
     if (!m_settings.contains(QStringLiteral("backend/python"))) {
         m_settings.setValue(QStringLiteral("backend/python"), m_backendPython);
@@ -94,8 +91,7 @@ void SettingsService::load()
     }
 }
 
-void SettingsService::setThemeMode(const QString &mode)
-{
+void SettingsService::setThemeMode(const QString &mode) {
     const QString normalized = normalizeThemeMode(mode);
     if (m_themeMode == normalized)
         return;
@@ -105,8 +101,7 @@ void SettingsService::setThemeMode(const QString &mode)
     emit themeModeChanged();
 }
 
-void SettingsService::setNavExpanded(bool expanded)
-{
+void SettingsService::setNavExpanded(bool expanded) {
     if (m_navExpanded == expanded)
         return;
     m_navExpanded = expanded;
@@ -115,8 +110,7 @@ void SettingsService::setNavExpanded(bool expanded)
     emit navExpandedChanged();
 }
 
-void SettingsService::setInspectorCollapsed(bool collapsed)
-{
+void SettingsService::setInspectorCollapsed(bool collapsed) {
     if (m_inspectorCollapsed == collapsed)
         return;
     m_inspectorCollapsed = collapsed;
@@ -125,8 +119,7 @@ void SettingsService::setInspectorCollapsed(bool collapsed)
     emit inspectorCollapsedChanged();
 }
 
-void SettingsService::setUiFontFamily(const QString &family)
-{
+void SettingsService::setUiFontFamily(const QString &family) {
     if (m_uiFontFamily == family)
         return;
     m_uiFontFamily = family;
@@ -135,8 +128,7 @@ void SettingsService::setUiFontFamily(const QString &family)
     emit uiFontFamilyChanged();
 }
 
-void SettingsService::setMonoFontFamily(const QString &family)
-{
+void SettingsService::setMonoFontFamily(const QString &family) {
     if (m_monoFontFamily == family)
         return;
     m_monoFontFamily = family;
@@ -145,8 +137,7 @@ void SettingsService::setMonoFontFamily(const QString &family)
     emit monoFontFamilyChanged();
 }
 
-void SettingsService::setUiFontSize(int size)
-{
+void SettingsService::setUiFontSize(int size) {
     if (m_uiFontSize == size)
         return;
     m_uiFontSize = size;
@@ -155,8 +146,7 @@ void SettingsService::setUiFontSize(int size)
     emit uiFontSizeChanged();
 }
 
-void SettingsService::setPreviewQuality(int quality)
-{
+void SettingsService::setPreviewQuality(int quality) {
     if (m_previewQuality == quality)
         return;
     m_previewQuality = quality;
@@ -165,8 +155,7 @@ void SettingsService::setPreviewQuality(int quality)
     emit previewQualityChanged();
 }
 
-void SettingsService::setConcurrentTasks(int tasks)
-{
+void SettingsService::setConcurrentTasks(int tasks) {
     if (m_concurrentTasks == tasks)
         return;
     m_concurrentTasks = tasks;
@@ -175,8 +164,7 @@ void SettingsService::setConcurrentTasks(int tasks)
     emit concurrentTasksChanged();
 }
 
-void SettingsService::setBackendPython(const QString &python)
-{
+void SettingsService::setBackendPython(const QString &python) {
     if (m_backendPython == python)
         return;
     m_backendPython = python;
@@ -185,8 +173,7 @@ void SettingsService::setBackendPython(const QString &python)
     emit backendChanged();
 }
 
-void SettingsService::setBackendRepoRoot(const QString &repoRoot)
-{
+void SettingsService::setBackendRepoRoot(const QString &repoRoot) {
     if (m_backendRepoRoot == repoRoot)
         return;
     m_backendRepoRoot = repoRoot;
@@ -195,8 +182,7 @@ void SettingsService::setBackendRepoRoot(const QString &repoRoot)
     emit backendChanged();
 }
 
-void SettingsService::addRecentFile(const QString &path)
-{
+void SettingsService::addRecentFile(const QString &path) {
     if (path.isEmpty())
         return;
     QStringList updated = m_recentFiles;
@@ -212,14 +198,12 @@ void SettingsService::addRecentFile(const QString &path)
     emit recentFilesChanged();
 }
 
-void SettingsService::resetLayout()
-{
+void SettingsService::resetLayout() {
     setNavExpanded(false);
     setInspectorCollapsed(false);
 }
 
-QVariant SettingsService::value(const QString &key, const QVariant &fallback) const
-{
+QVariant SettingsService::value(const QString &key, const QVariant &fallback) const {
     return m_settings.value(key, fallback);
 }
 

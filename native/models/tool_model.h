@@ -13,24 +13,21 @@ namespace toolbox {
 //
 // Phase 2: static data built in Application. Phase 4 will move the catalog
 // into ToolCatalogService (search/favorites/recents) without changing roles.
-class ToolModel : public QAbstractListModel
-{
+class ToolModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
-public:
-    struct Entry
-    {
+  public:
+    struct Entry {
         QString id;
         QString title;
         QString category;
         bool available = false;
-        QString phase;     // P0/P1/P2 — honest completion level, matrix-aligned
-        QString keywords;  // space separated, for Phase 4 search
+        QString phase;    // P0/P1/P2 — honest completion level, matrix-aligned
+        QString keywords; // space separated, for Phase 4 search
     };
 
-    enum Roles
-    {
+    enum Roles {
         IdRole = Qt::UserRole + 1,
         TitleRole,
         CategoryRole,
@@ -55,19 +52,17 @@ public:
 
     void addEntry(const Entry &entry);
 
-private:
+  private:
     QVector<Entry> m_entries;
 };
 
 // Navigation-only model: fixed entries with a target page URL.
-class NavModel : public QAbstractListModel
-{
+class NavModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
-public:
-    struct Entry
-    {
+  public:
+    struct Entry {
         QString id;
         QString title;
         QUrl page;
@@ -75,8 +70,7 @@ public:
         QString phase;
     };
 
-    enum Roles
-    {
+    enum Roles {
         NavIdRole = Qt::UserRole + 1,
         NavTitleRole,
         NavPageRole,
@@ -95,7 +89,7 @@ public:
 
     void addEntry(const Entry &entry);
 
-private:
+  private:
     QVector<Entry> m_entries;
 };
 

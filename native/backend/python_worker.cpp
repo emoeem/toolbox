@@ -9,19 +9,14 @@
 
 namespace toolbox {
 
-PythonWorker::PythonWorker(QObject *parent)
-    : QObject(parent)
-{
-}
+PythonWorker::PythonWorker(QObject *parent) : QObject(parent) {}
 
-PythonWorker::~PythonWorker()
-{
+PythonWorker::~PythonWorker() {
     stop();
 }
 
 void PythonWorker::configure(const QString &pythonExecutable, const QString &mainPyPath,
-                             const QString &repoRoot, const QString &tempDir, int maxWorkers)
-{
+                             const QString &repoRoot, const QString &tempDir, int maxWorkers) {
     m_python = pythonExecutable;
     m_mainPy = mainPyPath;
     m_repoRoot = repoRoot;
@@ -29,8 +24,7 @@ void PythonWorker::configure(const QString &pythonExecutable, const QString &mai
     m_maxWorkers = maxWorkers;
 }
 
-bool PythonWorker::start()
-{
+bool PythonWorker::start() {
     if (isRunning())
         return true;
     if (m_python.isEmpty() || m_mainPy.isEmpty())
@@ -41,18 +35,15 @@ bool PythonWorker::start()
     m_buffer.clear();
     m_stderrTail.clear();
 
-    connect(m_process, &QProcess::readyReadStandardOutput,
-            this, &PythonWorker::onReadyReadStandardOutput);
-    connect(m_process, &QProcess::readyReadStandardError,
-            this, &PythonWorker::onReadyReadStandardError);
-    connect(m_process, &QProcess::finished,
-            this, &PythonWorker::onFinished);
-    connect(m_process, &QProcess::errorOccurred,
-            this, &PythonWorker::onErrorOccurred);
+    connect(m_process, &QProcess::readyReadStandardOutput, this,
+            &PythonWorker::onReadyReadStandardOutput);
+    connect(m_process, &QProcess::readyReadStandardError, this,
+            &PythonWorker::onReadyReadStandardError);
+    connect(m_process, &QProcess::finished, this, &PythonWorker::onFinished);
+    connect(m_process, &QProcess::errorOccurred, this, &PythonWorker::onErrorOccurred);
 
     QStringList args;
-    args << m_mainPy
-         << QStringLiteral("--repo-root") << m_repoRoot
+    args << m_mainPy << QStringLiteral("--repo-root") << m_repoRoot
          << QStringLiteral("--max-workers") << QString::number(m_maxWorkers);
     if (!m_tempDir.isEmpty())
         args << QStringLiteral("--temp-dir") << m_tempDir;
@@ -67,8 +58,7 @@ bool PythonWorker::start()
     return m_process->waitForStarted(5000);
 }
 
-void PythonWorker::stop()
-{
+void PythonWorker::stop() {
     if (!m_process)
         return;
     if (m_process->state() == QProcess::NotRunning) {
@@ -89,27 +79,23 @@ void PythonWorker::stop()
     });
 }
 
-bool PythonWorker::isRunning() const
-{
+bool PythonWorker::isRunning() const {
     return m_process && m_process->state() != QProcess::NotRunning;
 }
 
 void PythonWorker::sendRequest(const QString &requestId, const QString &action,
-                               const QJsonObject &params)
-{
+                               const QJsonObject &params) {
     const QJsonObject request = ipc::IpcProtocol::makeRequest(requestId, action, params);
     sendLine(QJsonDocument(request).toJson(QJsonDocument::Compact));
 }
 
-void PythonWorker::sendLine(const QByteArray &line)
-{
+void PythonWorker::sendLine(const QByteArray &line) {
     if (!m_process || !isRunning())
         return;
     m_process->write(line.endsWith('\n') ? line : line + '\n');
 }
 
-void PythonWorker::onReadyReadStandardOutput()
-{
+void PythonWorker::onReadyReadStandardOutput() {
     if (!m_process)
         return;
     m_buffer += m_process->readAllStandardOutput();
@@ -123,8 +109,7 @@ void PythonWorker::onReadyReadStandardOutput()
     }
 }
 
-void PythonWorker::onReadyReadStandardError()
-{
+void PythonWorker::onReadyReadStandardError() {
     if (!m_process)
         return;
     const QByteArray chunk = m_process->readAllStandardError();
@@ -135,12 +120,12 @@ void PythonWorker::onReadyReadStandardError()
     qWarning("python-worker stderr: %s", QByteArray(chunk).constData());
 }
 
-void PythonWorker::dispatchFrame(const QByteArray &line)
-{
+void PythonWorker::dispatchFrame(const QByteArray &line) {
     QJsonParseError parseError{};
     const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        emit protocolError(QStringLiteral("无法解析 Worker 消息: %1").arg(parseError.errorString()));
+        emit protocolError(
+            QStringLiteral("无法解析 Worker 消息: %1").arg(parseError.errorString()));
         return;
     }
     const QJsonObject message = doc.object();
@@ -154,18 +139,17 @@ void PythonWorker::dispatchFrame(const QByteArray &line)
         break;
     case ipc::FrameKind::Request:
     case ipc::FrameKind::Invalid:
-        emit protocolError(QStringLiteral("未知消息类型: %1").arg(QString::fromUtf8(line.left(120))));
+        emit protocolError(
+            QStringLiteral("未知消息类型: %1").arg(QString::fromUtf8(line.left(120))));
         break;
     }
 }
 
-void PythonWorker::onFinished(int exitCode, QProcess::ExitStatus status)
-{
+void PythonWorker::onFinished(int exitCode, QProcess::ExitStatus status) {
     emit processExited(exitCode, status);
 }
 
-void PythonWorker::onErrorOccurred(QProcess::ProcessError error)
-{
+void PythonWorker::onErrorOccurred(QProcess::ProcessError error) {
     emit processError(error);
 }
 

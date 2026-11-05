@@ -28,11 +28,10 @@
 
 using toolbox::SettingsService;
 
-class TestSettingsService : public QObject
-{
+class TestSettingsService : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     void initTestCase();
     void init();
     void cleanup();
@@ -47,12 +46,11 @@ private slots:
     void addRecentFileCapsAtTen();
     void resetLayoutRestoresDefaults();
 
-private:
+  private:
     std::unique_ptr<QTemporaryDir> m_storeDir;
 };
 
-void TestSettingsService::initTestCase()
-{
+void TestSettingsService::initTestCase() {
     // QSettings::setPath() redirects only IniFormat, while SettingsService
     // builds its store in the default (native) format. On Windows the native
     // format is the registry and on Apple platforms CFPreferences, so the
@@ -70,20 +68,17 @@ void TestSettingsService::initTestCase()
 #endif
 }
 
-void TestSettingsService::init()
-{
+void TestSettingsService::init() {
     m_storeDir = std::make_unique<QTemporaryDir>();
     QVERIFY(m_storeDir->isValid());
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_storeDir->path());
 }
 
-void TestSettingsService::cleanup()
-{
+void TestSettingsService::cleanup() {
     m_storeDir.reset();
 }
 
-void TestSettingsService::defaultsOnEmptyStore()
-{
+void TestSettingsService::defaultsOnEmptyStore() {
     const SettingsService service;
 
     QCOMPARE(service.themeMode(), QStringLiteral("system"));
@@ -100,8 +95,7 @@ void TestSettingsService::defaultsOnEmptyStore()
     QVERIFY(service.backendRepoRoot().isEmpty());
 }
 
-void TestSettingsService::writeReadRoundTripPersists()
-{
+void TestSettingsService::writeReadRoundTripPersists() {
     SettingsService writer;
     writer.setThemeMode(QStringLiteral("light"));
     writer.setNavExpanded(true);
@@ -139,12 +133,11 @@ void TestSettingsService::writeReadRoundTripPersists()
     QCOMPARE(reader.value(QStringLiteral("layout/navExpanded")).toBool(), true);
     QCOMPARE(reader.value(QStringLiteral("font/size")).toInt(), 13);
     QCOMPARE(reader.value(QStringLiteral("files/recent")).toStringList().size(), 2);
-    QCOMPARE(reader.value(QStringLiteral("nonexistent.key"), QStringLiteral("fallback"))
-                 .toString(), QStringLiteral("fallback"));
+    QCOMPARE(reader.value(QStringLiteral("nonexistent.key"), QStringLiteral("fallback")).toString(),
+             QStringLiteral("fallback"));
 }
 
-void TestSettingsService::unchangedWriteDoesNotNotify()
-{
+void TestSettingsService::unchangedWriteDoesNotNotify() {
     SettingsService service;
     service.setThemeMode(QStringLiteral("light"));
 
@@ -152,7 +145,7 @@ void TestSettingsService::unchangedWriteDoesNotNotify()
     QSignalSpy sizeChanged(&service, &SettingsService::uiFontSizeChanged);
     QSignalSpy backendChanged(&service, &SettingsService::backendChanged);
 
-    service.setThemeMode(QStringLiteral("light"));   // unchanged → no signal
+    service.setThemeMode(QStringLiteral("light")); // unchanged → no signal
     service.setUiFontSize(SettingsService::kDefaultFontSize);
     service.setBackendPython(QStringLiteral("python3"));
     QCOMPARE(themeChanged.count(), 0);
@@ -167,8 +160,7 @@ void TestSettingsService::unchangedWriteDoesNotNotify()
     QCOMPARE(backendChanged.count(), 1);
 }
 
-void TestSettingsService::corruptStoreFallsBackToDefaults()
-{
+void TestSettingsService::corruptStoreFallsBackToDefaults() {
     {
         // Values written directly into the store (unreadable types), mirroring
         // app/fonts.py resolve_size's unreadable-value path.
@@ -185,8 +177,7 @@ void TestSettingsService::corruptStoreFallsBackToDefaults()
     QCOMPARE(service.themeMode(), QStringLiteral("system"));
 }
 
-void TestSettingsService::themeModeIsNormalized()
-{
+void TestSettingsService::themeModeIsNormalized() {
     SettingsService service;
     service.setThemeMode(QStringLiteral("DARK"));
     QCOMPARE(service.themeMode(), QStringLiteral("dark"));
@@ -201,8 +192,7 @@ void TestSettingsService::themeModeIsNormalized()
              QStringLiteral("system"));
 }
 
-void TestSettingsService::addRecentFileEmptyIgnored()
-{
+void TestSettingsService::addRecentFileEmptyIgnored() {
     SettingsService service;
     service.addRecentFile(QStringLiteral("/tmp/a.png"));
 
@@ -214,8 +204,7 @@ void TestSettingsService::addRecentFileEmptyIgnored()
     QCOMPARE(changed.count(), 0);
 }
 
-void TestSettingsService::addRecentFileDeduplicatesAndMovesToFront()
-{
+void TestSettingsService::addRecentFileDeduplicatesAndMovesToFront() {
     SettingsService service;
     service.addRecentFile(QStringLiteral("/tmp/a.png"));
     service.addRecentFile(QStringLiteral("/tmp/b.png"));
@@ -237,8 +226,7 @@ void TestSettingsService::addRecentFileDeduplicatesAndMovesToFront()
     QCOMPARE(service.recentFiles().size(), 3);
 }
 
-void TestSettingsService::addRecentFileCapsAtTen()
-{
+void TestSettingsService::addRecentFileCapsAtTen() {
     SettingsService service;
     for (int i = 1; i <= 12; ++i)
         service.addRecentFile(QStringLiteral("/tmp/f%1.png").arg(i));
@@ -254,8 +242,7 @@ void TestSettingsService::addRecentFileCapsAtTen()
     QCOMPARE(reloaded.recentFiles().first(), QStringLiteral("/tmp/f12.png"));
 }
 
-void TestSettingsService::resetLayoutRestoresDefaults()
-{
+void TestSettingsService::resetLayoutRestoresDefaults() {
     SettingsService service;
     service.setThemeMode(QStringLiteral("dark"));
     service.setUiFontSize(14);

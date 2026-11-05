@@ -18,20 +18,19 @@ namespace toolbox {
 // Phase 2 scope: local file display, wheel zoom (cursor anchored), drag pan,
 // fit / 100%, checkerboard for alpha images. Phase 3+ will feed this canvas
 // from the Python Worker (preview files) instead of local QImageReader.
-class ImageCanvas : public QQuickItem
-{
+class ImageCanvas : public QQuickItem {
     Q_OBJECT
     QML_ELEMENT
 
     Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
     Q_PROPERTY(QSize imageSize READ imageSize NOTIFY imageSizeChanged)
-    Q_PROPERTY(bool showCheckerboard READ showCheckerboard WRITE setShowCheckerboard
-                   NOTIFY showCheckerboardChanged)
+    Q_PROPERTY(bool showCheckerboard READ showCheckerboard WRITE setShowCheckerboard NOTIFY
+                   showCheckerboardChanged)
     Q_PROPERTY(QPointF mousePosition READ mousePosition NOTIFY mousePositionChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
 
-public:
+  public:
     explicit ImageCanvas(QQuickItem *parent = nullptr);
 
     QUrl source() const { return m_source; }
@@ -50,7 +49,7 @@ public:
     Q_INVOKABLE void setActualSize();
     Q_INVOKABLE void zoomBy(qreal factor); // anchored to the item center
 
-signals:
+  signals:
     void sourceChanged();
     void zoomChanged();
     void imageSizeChanged();
@@ -60,7 +59,7 @@ signals:
     void imageDropped(const QUrl &url);
     void loadFailed(const QString &reason);
 
-protected:
+  protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) override;
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     void mousePressEvent(QMouseEvent *event) override;
@@ -72,7 +71,7 @@ protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
 
-private:
+  private:
     QRectF imageRect() const;
     QPointF mapToImage(const QPointF &itemPos) const;
     void emitMousePosition(const QPointF &itemPos);

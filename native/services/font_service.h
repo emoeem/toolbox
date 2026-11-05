@@ -18,14 +18,13 @@ namespace toolbox {
 // so the settings page offers the same lists the resolver was built for; the
 // caller resolves a family with resolveFamily() before applyToApplication().
 // Phase 4 task 4 of the project plan ("字体角色和字体设置").
-class FontService : public QObject
-{
+class FontService : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
 
-public:
-    static constexpr int kDefaultFontSize = 11;  // app/fonts.py DEFAULT_SIZE
+  public:
+    static constexpr int kDefaultFontSize = 11; // app/fonts.py DEFAULT_SIZE
 
     explicit FontService(QObject *parent = nullptr);
     ~FontService() override;
@@ -57,14 +56,13 @@ public:
     //                           that set's first code point, max 8 } }
     // Mirrors app/fonts.py diagnose (109-131) with the fallback lists nested
     // per font instead of one ui-only top-level dict.
-    Q_INVOKABLE QVariantMap diagnose(const QString &family, const QString &mono,
-                                     int size) const;
+    Q_INVOKABLE QVariantMap diagnose(const QString &family, const QString &mono, int size) const;
 
     // Candidate chains (see class comment for their origin).
     Q_INVOKABLE QStringList sansCandidates() const;
     Q_INVOKABLE QStringList monoCandidates() const;
 
-private:
+  private:
     QFont uiFont(const QString &family, int size) const;
     QFont monoFont(const QString &family, int size) const;
     QVariantMap glyphReport(const QFont &font, const QString &requested) const;

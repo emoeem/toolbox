@@ -30,39 +30,39 @@ using toolbox::TaskModel;
 
 namespace {
 
-QJsonObject successResponse(const QString &requestId, const QString &taskId)
-{
+QJsonObject successResponse(const QString &requestId, const QString &taskId) {
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("request_id"), requestId},
         {QStringLiteral("success"), true},
-        {QStringLiteral("result"), QJsonObject{
+        {QStringLiteral("result"),
+         QJsonObject{
              {QStringLiteral("task_id"), taskId},
              {QStringLiteral("status"), QStringLiteral("queued")},
          }},
     };
 }
 
-QJsonObject syncResponse(const QString &requestId)
-{
+QJsonObject syncResponse(const QString &requestId) {
     // A tracked-but-synchronous action: success without a task_id.
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("request_id"), requestId},
         {QStringLiteral("success"), true},
-        {QStringLiteral("result"), QJsonObject{
+        {QStringLiteral("result"),
+         QJsonObject{
              {QStringLiteral("filter_count"), 153},
          }},
     };
 }
 
-QJsonObject failedResponse(const QString &requestId, const QString &code)
-{
+QJsonObject failedResponse(const QString &requestId, const QString &code) {
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("request_id"), requestId},
         {QStringLiteral("success"), false},
-        {QStringLiteral("error"), QJsonObject{
+        {QStringLiteral("error"),
+         QJsonObject{
              {QStringLiteral("code"), code},
              {QStringLiteral("message"), QStringLiteral("处理失败")},
              {QStringLiteral("details"), QJsonObject{}},
@@ -70,8 +70,7 @@ QJsonObject failedResponse(const QString &requestId, const QString &code)
     };
 }
 
-QJsonObject progressEvent(const QString &taskId, int progress)
-{
+QJsonObject progressEvent(const QString &taskId, int progress) {
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("type"), QStringLiteral("task.progress")},
@@ -80,25 +79,25 @@ QJsonObject progressEvent(const QString &taskId, int progress)
     };
 }
 
-QJsonObject completedEvent(const QString &taskId)
-{
+QJsonObject completedEvent(const QString &taskId) {
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("type"), QStringLiteral("task.completed")},
         {QStringLiteral("task_id"), taskId},
-        {QStringLiteral("result"), QJsonObject{
+        {QStringLiteral("result"),
+         QJsonObject{
              {QStringLiteral("path"), QStringLiteral("/tmp/toolbox-worker-1/prev.png")},
          }},
     };
 }
 
-QJsonObject failedEvent(const QString &taskId, const QString &code, const QString &message)
-{
+QJsonObject failedEvent(const QString &taskId, const QString &code, const QString &message) {
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("type"), QStringLiteral("task.failed")},
         {QStringLiteral("task_id"), taskId},
-        {QStringLiteral("error"), QJsonObject{
+        {QStringLiteral("error"),
+         QJsonObject{
              {QStringLiteral("code"), code},
              {QStringLiteral("message"), message},
              {QStringLiteral("details"), QJsonObject{}},
@@ -108,8 +107,7 @@ QJsonObject failedEvent(const QString &taskId, const QString &code, const QStrin
 
 // Owns manager + model in destruction-safe order (the model is destroyed
 // first, so it never observes a half-dead backend).
-struct Harness
-{
+struct Harness {
     BackendManager backend;
     TaskModel model;
 
@@ -117,8 +115,7 @@ struct Harness
 
     // Simulates an async action: the UI registers the request and the manager
     // forwards its success response carrying a task_id (docs/ipc-protocol.md §2.3).
-    void spawn(const QString &requestId, const QString &taskId, const QString &name)
-    {
+    void spawn(const QString &requestId, const QString &taskId, const QString &name) {
         model.trackRequest(requestId, name);
         emit backend.responseReady(requestId, successResponse(requestId, taskId));
     }
@@ -126,11 +123,10 @@ struct Harness
 
 } // namespace
 
-class TestTaskModel : public QObject
-{
+class TestTaskModel : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     void roleNamesMatchImplementation();
     void trackedResponseCreatesRow();
     void untrackedFailedAndSyncResponsesCreateNoRow();
@@ -143,12 +139,11 @@ private slots:
     void terminalRowsCappedAtSixtyFour();
     void activeRowsSurviveTrimming();
 
-private:
+  private:
     static int rowOfTaskId(const QAbstractItemModel &model, const QString &taskId);
 };
 
-int TestTaskModel::rowOfTaskId(const QAbstractItemModel &model, const QString &taskId)
-{
+int TestTaskModel::rowOfTaskId(const QAbstractItemModel &model, const QString &taskId) {
     for (int row = 0; row < model.rowCount(); ++row) {
         if (model.index(row, 0).data(TaskModel::TaskIdRole).toString() == taskId)
             return row;
@@ -156,8 +151,7 @@ int TestTaskModel::rowOfTaskId(const QAbstractItemModel &model, const QString &t
     return -1;
 }
 
-void TestTaskModel::roleNamesMatchImplementation()
-{
+void TestTaskModel::roleNamesMatchImplementation() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
 
@@ -171,8 +165,7 @@ void TestTaskModel::roleNamesMatchImplementation()
     QCOMPARE(roles.value(TaskModel::ErrorRole), QByteArray("taskError"));
 }
 
-void TestTaskModel::trackedResponseCreatesRow()
-{
+void TestTaskModel::trackedResponseCreatesRow() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     QSignalSpy rowsInserted(&h.model, &QAbstractItemModel::rowsInserted);
@@ -197,22 +190,21 @@ void TestTaskModel::trackedResponseCreatesRow()
     QVERIFY(!h.model.data(QModelIndex(), TaskModel::StatusRole).isValid());
 }
 
-void TestTaskModel::untrackedFailedAndSyncResponsesCreateNoRow()
-{
+void TestTaskModel::untrackedFailedAndSyncResponsesCreateNoRow() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
 
     // Untracked request (worker.hello / task.cancel / sync actions): no row.
-    emit h.backend.responseReady(QStringLiteral("req-a"),
-                                 successResponse(QStringLiteral("req-a"),
-                                                 QStringLiteral("task-ghost")));
+    emit h.backend.responseReady(
+        QStringLiteral("req-a"),
+        successResponse(QStringLiteral("req-a"), QStringLiteral("task-ghost")));
     QCOMPARE(h.model.rowCount(), 0);
 
     // Failure response for a tracked request: it will never produce a task.
     h.model.trackRequest(QStringLiteral("req-b"), QStringLiteral("图像保存"));
-    emit h.backend.responseReady(QStringLiteral("req-b"),
-                                 failedResponse(QStringLiteral("req-b"),
-                                                QStringLiteral("UNSUPPORTED_FORMAT")));
+    emit h.backend.responseReady(
+        QStringLiteral("req-b"),
+        failedResponse(QStringLiteral("req-b"), QStringLiteral("UNSUPPORTED_FORMAT")));
     QCOMPARE(h.model.rowCount(), 0);
 
     // Tracked success without task_id: sync action, nothing to track.
@@ -235,8 +227,7 @@ void TestTaskModel::untrackedFailedAndSyncResponsesCreateNoRow()
     QCOMPARE(h.model.rowCount(), 0);
 }
 
-void TestTaskModel::progressEventsUpdateRow()
-{
+void TestTaskModel::progressEventsUpdateRow() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     QSignalSpy changed(&h.model, &QAbstractItemModel::dataChanged);
@@ -270,8 +261,7 @@ void TestTaskModel::progressEventsUpdateRow()
     QCOMPARE(h.model.index(0, 0).data(TaskModel::ProgressRole).toInt(), 55);
 }
 
-void TestTaskModel::completedEventIsTerminal()
-{
+void TestTaskModel::completedEventIsTerminal() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     h.spawn(QStringLiteral("req-1"), QStringLiteral("task-1"), QStringLiteral("滤镜预览"));
@@ -285,8 +275,7 @@ void TestTaskModel::completedEventIsTerminal()
     QVERIFY(index.data(TaskModel::ErrorRole).toString().isEmpty());
 }
 
-void TestTaskModel::failedEventCarriesError()
-{
+void TestTaskModel::failedEventCarriesError() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     h.spawn(QStringLiteral("req-1"), QStringLiteral("task-1"), QStringLiteral("滤镜预览"));
@@ -297,12 +286,11 @@ void TestTaskModel::failedEventCarriesError()
 
     const auto index = h.model.index(0, 0);
     QCOMPARE(index.data(TaskModel::StatusRole).toString(), QStringLiteral("failed"));
-    QCOMPARE(index.data(TaskModel::ProgressRole).toInt(), 30);  // progress retained
+    QCOMPARE(index.data(TaskModel::ProgressRole).toInt(), 30); // progress retained
     QCOMPARE(index.data(TaskModel::ErrorRole).toString(), QStringLiteral("处理器执行异常"));
 }
 
-void TestTaskModel::cancelledCodeMapsToCancelled()
-{
+void TestTaskModel::cancelledCodeMapsToCancelled() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     h.spawn(QStringLiteral("req-1"), QStringLiteral("task-1"), QStringLiteral("滤镜预览"));
@@ -319,8 +307,7 @@ void TestTaskModel::cancelledCodeMapsToCancelled()
     QCOMPARE(index.data(TaskModel::ErrorRole).toString(), QStringLiteral("任务已取消"));
 }
 
-void TestTaskModel::cancelTaskFlipsActiveRowAndForwards()
-{
+void TestTaskModel::cancelTaskFlipsActiveRowAndForwards() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     QSignalSpy changed(&h.model, &QAbstractItemModel::dataChanged);
@@ -356,8 +343,7 @@ void TestTaskModel::cancelTaskFlipsActiveRowAndForwards()
     QCOMPARE(standalone.rowCount(), 0);
 }
 
-void TestTaskModel::cancelTaskRejectsTerminalRows()
-{
+void TestTaskModel::cancelTaskRejectsTerminalRows() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     QSignalSpy changed(&h.model, &QAbstractItemModel::dataChanged);
@@ -380,8 +366,7 @@ void TestTaskModel::cancelTaskRejectsTerminalRows()
     QCOMPARE(h.backend.sendAction(QStringLiteral("probe")), QStringLiteral("req-1"));
 }
 
-void TestTaskModel::terminalRowsCappedAtSixtyFour()
-{
+void TestTaskModel::terminalRowsCappedAtSixtyFour() {
     QCOMPARE(TaskModel::kMaxTerminalRows, 64);
 
     Harness h;
@@ -394,14 +379,12 @@ void TestTaskModel::terminalRowsCappedAtSixtyFour()
 
     QCOMPARE(h.model.rowCount(), TaskModel::kMaxTerminalRows);
     // The oldest terminal rows were trimmed (FIFO), the newest survive.
-    QCOMPARE(h.model.index(0, 0).data(TaskModel::TaskIdRole).toString(),
-             QStringLiteral("task-7"));
+    QCOMPARE(h.model.index(0, 0).data(TaskModel::TaskIdRole).toString(), QStringLiteral("task-7"));
     QCOMPARE(h.model.index(h.model.rowCount() - 1, 0).data(TaskModel::TaskIdRole).toString(),
              QStringLiteral("task-70"));
 }
 
-void TestTaskModel::activeRowsSurviveTrimming()
-{
+void TestTaskModel::activeRowsSurviveTrimming() {
     Harness h;
     QAbstractItemModelTester tester(&h.model);
     for (int i = 1; i <= 64; ++i) {
@@ -425,7 +408,9 @@ void TestTaskModel::activeRowsSurviveTrimming()
     QCOMPARE(h.model.rowCount(), TaskModel::kMaxTerminalRows + 1);
     QVERIFY(rowOfTaskId(h.model, QStringLiteral("task-65")) >= 0);
     QCOMPARE(h.model.index(rowOfTaskId(h.model, QStringLiteral("task-65")), 0)
-                 .data(TaskModel::StatusRole).toString(), QStringLiteral("queued"));
+                 .data(TaskModel::StatusRole)
+                 .toString(),
+             QStringLiteral("queued"));
     QVERIFY(rowOfTaskId(h.model, QStringLiteral("task-1")) < 0);
     QVERIFY(rowOfTaskId(h.model, QStringLiteral("task-4")) < 0);
     QVERIFY(rowOfTaskId(h.model, QStringLiteral("task-5")) >= 0);

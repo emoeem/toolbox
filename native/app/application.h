@@ -16,8 +16,7 @@ namespace toolbox {
 // task queue, the Worker manager and the preference/font services, plus page
 // routing. Deliberately thin — further services (Document/Filter) arrive in
 // later phases and must be wired here, not into QML.
-class Application : public QObject
-{
+class Application : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
@@ -32,7 +31,7 @@ class Application : public QObject
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
 
-public:
+  public:
     explicit Application(QObject *parent = nullptr);
 
     static Application *create(QQmlEngine *qmlEngine, QJSEngine *jsEngine);
@@ -58,10 +57,10 @@ public:
     // (backend_manager.cpp:74-78) — no separate Application-level signal.
     Q_INVOKABLE void startBackend();
 
-signals:
+  signals:
     void currentPageChanged();
 
-private:
+  private:
     void buildCatalog();
 
     BackendManager m_backend;

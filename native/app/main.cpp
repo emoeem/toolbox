@@ -9,8 +9,7 @@
 #include <QUrl>
 #include <QtCore/qlogging.h>
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     QGuiApplication::setOrganizationName(QStringLiteral("Emo"));
     QGuiApplication::setApplicationName(QStringLiteral("Toolbox2"));

@@ -28,39 +28,40 @@ namespace toolbox {
 //   preview/quality            previewQuality      0=draft 1=balanced 2=high (default 1)
 //   tasks/concurrent           concurrentTasks     default 2 (BackendManager maxWorkers)
 //   files/recent               recentFiles         most-recent-first, capped at 10
-class SettingsService : public QObject
-{
+class SettingsService : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
 
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
     Q_PROPERTY(bool navExpanded READ navExpanded WRITE setNavExpanded NOTIFY navExpandedChanged)
-    Q_PROPERTY(bool inspectorCollapsed READ inspectorCollapsed WRITE setInspectorCollapsed
-                   NOTIFY inspectorCollapsedChanged)
-    Q_PROPERTY(QString uiFontFamily READ uiFontFamily WRITE setUiFontFamily NOTIFY uiFontFamilyChanged)
-    Q_PROPERTY(QString monoFontFamily READ monoFontFamily WRITE setMonoFontFamily
-                   NOTIFY monoFontFamilyChanged)
+    Q_PROPERTY(bool inspectorCollapsed READ inspectorCollapsed WRITE setInspectorCollapsed NOTIFY
+                   inspectorCollapsedChanged)
+    Q_PROPERTY(
+        QString uiFontFamily READ uiFontFamily WRITE setUiFontFamily NOTIFY uiFontFamilyChanged)
+    Q_PROPERTY(QString monoFontFamily READ monoFontFamily WRITE setMonoFontFamily NOTIFY
+                   monoFontFamilyChanged)
     Q_PROPERTY(int uiFontSize READ uiFontSize WRITE setUiFontSize NOTIFY uiFontSizeChanged)
-    Q_PROPERTY(int previewQuality READ previewQuality WRITE setPreviewQuality
-                   NOTIFY previewQualityChanged)
-    Q_PROPERTY(int concurrentTasks READ concurrentTasks WRITE setConcurrentTasks
-                   NOTIFY concurrentTasksChanged)
+    Q_PROPERTY(
+        int previewQuality READ previewQuality WRITE setPreviewQuality NOTIFY previewQualityChanged)
+    Q_PROPERTY(int concurrentTasks READ concurrentTasks WRITE setConcurrentTasks NOTIFY
+                   concurrentTasksChanged)
     Q_PROPERTY(QStringList recentFiles READ recentFiles NOTIFY recentFilesChanged)
     // Backend launcher paths (Phase 4 settings page). Both share one NOTIFY:
     // they change together from the same form and no consumer needs to tell
     // them apart. Keys are exactly the ones Application::startBackend() reads
     // via value() (application.cpp:58-59), so a write here is immediately
     // visible to the next start.
-    Q_PROPERTY(QString backendPython READ backendPython WRITE setBackendPython NOTIFY backendChanged)
-    Q_PROPERTY(QString backendRepoRoot READ backendRepoRoot WRITE setBackendRepoRoot
-                   NOTIFY backendChanged)
+    Q_PROPERTY(
+        QString backendPython READ backendPython WRITE setBackendPython NOTIFY backendChanged)
+    Q_PROPERTY(
+        QString backendRepoRoot READ backendRepoRoot WRITE setBackendRepoRoot NOTIFY backendChanged)
 
-public:
+  public:
     static constexpr int kMaxRecentFiles = 10;
-    static constexpr int kDefaultFontSize = 11;        // app/fonts.py DEFAULT_SIZE
-    static constexpr int kDefaultPreviewQuality = 1;   // balanced (0=draft, 2=high)
-    static constexpr int kDefaultConcurrentTasks = 2;  // BackendManager::configure default
+    static constexpr int kDefaultFontSize = 11;       // app/fonts.py DEFAULT_SIZE
+    static constexpr int kDefaultPreviewQuality = 1;  // balanced (0=draft, 2=high)
+    static constexpr int kDefaultConcurrentTasks = 2; // BackendManager::configure default
 
     explicit SettingsService(QObject *parent = nullptr);
     ~SettingsService() override;
@@ -111,7 +112,7 @@ public:
     // settings page landed).
     Q_INVOKABLE QVariant value(const QString &key, const QVariant &fallback = {}) const;
 
-signals:
+  signals:
     void themeModeChanged();
     void navExpandedChanged();
     void inspectorCollapsedChanged();
@@ -123,12 +124,12 @@ signals:
     void recentFilesChanged();
     void backendChanged();
 
-private:
+  private:
     void load();
 
     QSettings m_settings;
     QString m_themeMode;
-    bool m_navExpanded = false;          // icon rail is the default (product IA §1)
+    bool m_navExpanded = false; // icon rail is the default (product IA §1)
     bool m_inspectorCollapsed = false;
     QString m_uiFontFamily;
     QString m_monoFontFamily;
@@ -136,7 +137,7 @@ private:
     int m_previewQuality = kDefaultPreviewQuality;
     int m_concurrentTasks = kDefaultConcurrentTasks;
     QStringList m_recentFiles;
-    QString m_backendPython = QStringLiteral("python3");   // launcher default
+    QString m_backendPython = QStringLiteral("python3"); // launcher default
     QString m_backendRepoRoot;
 };
 

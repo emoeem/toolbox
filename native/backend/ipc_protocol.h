@@ -25,9 +25,8 @@ inline constexpr auto kErrInternal = "INTERNAL";
 // Frame kinds on the wire.
 enum class FrameKind { Request, Response, Event, Invalid };
 
-class IpcProtocol
-{
-public:
+class IpcProtocol {
+  public:
     // Builders — C++ side.
     static QJsonObject makeRequest(const QString &requestId, const QString &action,
                                    const QJsonObject &params = {});

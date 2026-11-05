@@ -5,8 +5,7 @@
 namespace toolbox::ipc {
 
 QJsonObject IpcProtocol::makeRequest(const QString &requestId, const QString &action,
-                                     const QJsonObject &params)
-{
+                                     const QJsonObject &params) {
     return QJsonObject{
         {QStringLiteral("protocol"), kProtocolVersion},
         {QStringLiteral("request_id"), requestId},
@@ -15,25 +14,24 @@ QJsonObject IpcProtocol::makeRequest(const QString &requestId, const QString &ac
     };
 }
 
-QJsonObject IpcProtocol::makeCancelTask(const QString &requestId, const QString &taskId)
-{
+QJsonObject IpcProtocol::makeCancelTask(const QString &requestId, const QString &taskId) {
     return makeRequest(requestId, QStringLiteral("task.cancel"),
                        QJsonObject{{QStringLiteral("task_id"), taskId}});
 }
 
-FrameKind IpcProtocol::classify(const QJsonObject &message)
-{
+FrameKind IpcProtocol::classify(const QJsonObject &message) {
     if (message.contains(QStringLiteral("type")))
         return FrameKind::Event;
-    if (message.contains(QStringLiteral("request_id")) && message.contains(QStringLiteral("success")))
+    if (message.contains(QStringLiteral("request_id")) &&
+        message.contains(QStringLiteral("success")))
         return FrameKind::Response;
-    if (message.contains(QStringLiteral("request_id")) && message.contains(QStringLiteral("action")))
+    if (message.contains(QStringLiteral("request_id")) &&
+        message.contains(QStringLiteral("action")))
         return FrameKind::Request;
     return FrameKind::Invalid;
 }
 
-bool IpcProtocol::validateRequest(const QJsonObject &message, QString *error)
-{
+bool IpcProtocol::validateRequest(const QJsonObject &message, QString *error) {
     auto fail = [error](const QString &reason) {
         if (error)
             *error = reason;
@@ -53,28 +51,23 @@ bool IpcProtocol::validateRequest(const QJsonObject &message, QString *error)
     return true;
 }
 
-QString IpcProtocol::requestIdOf(const QJsonObject &message)
-{
+QString IpcProtocol::requestIdOf(const QJsonObject &message) {
     return message.value(QStringLiteral("request_id")).toString();
 }
 
-bool IpcProtocol::isSuccess(const QJsonObject &message)
-{
+bool IpcProtocol::isSuccess(const QJsonObject &message) {
     return message.value(QStringLiteral("success")).toBool(false);
 }
 
-QJsonObject IpcProtocol::resultOf(const QJsonObject &message)
-{
+QJsonObject IpcProtocol::resultOf(const QJsonObject &message) {
     return message.value(QStringLiteral("result")).toObject();
 }
 
-QJsonObject IpcProtocol::errorOf(const QJsonObject &message)
-{
+QJsonObject IpcProtocol::errorOf(const QJsonObject &message) {
     return message.value(QStringLiteral("error")).toObject();
 }
 
-QString IpcProtocol::eventTaskId(const QJsonObject &message)
-{
+QString IpcProtocol::eventTaskId(const QJsonObject &message) {
     return message.value(QStringLiteral("task_id")).toString();
 }
 

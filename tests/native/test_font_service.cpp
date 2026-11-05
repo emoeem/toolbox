@@ -22,19 +22,18 @@ using toolbox::FontService;
 namespace {
 
 const QStringList kCoverageClasses = {
-    QStringLiteral("latin"), QStringLiteral("digit"), QStringLiteral("cjk"),
+    QStringLiteral("latin"),  QStringLiteral("digit"), QStringLiteral("cjk"),
     QStringLiteral("symbol"), QStringLiteral("emoji"),
 };
 
-constexpr int kFallbackLimit = 8;  // font_service.cpp:184 (kFallbackLimit)
+constexpr int kFallbackLimit = 8; // font_service.cpp:184 (kFallbackLimit)
 
 } // namespace
 
-class TestFontService : public QObject
-{
+class TestFontService : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     void resolveFamilyPrefersPreferredFamily();
     void resolveFamilyWalksCandidateChainInOrder();
     void resolveFamilyUnknownFallsBackToPlatformDefault();
@@ -45,8 +44,7 @@ private slots:
     void applyToApplicationSetsAppFont();
 };
 
-void TestFontService::resolveFamilyPrefersPreferredFamily()
-{
+void TestFontService::resolveFamilyPrefersPreferredFamily() {
     if (QFontDatabase::families().isEmpty())
         QSKIP("系统未安装任何字体");
 
@@ -55,47 +53,44 @@ void TestFontService::resolveFamilyPrefersPreferredFamily()
     // An installed preferred family wins over the whole candidate chain
     // (font_service.cpp:97-98), including an empty chain.
     QCOMPARE(service.resolveFamily(installed, {}), installed);
-    QCOMPARE(service.resolveFamily(installed,
-                                   QStringList{QStringLiteral("ToolboxTestMissingSans")}),
-             installed);
+    QCOMPARE(
+        service.resolveFamily(installed, QStringList{QStringLiteral("ToolboxTestMissingSans")}),
+        installed);
 }
 
-void TestFontService::resolveFamilyWalksCandidateChainInOrder()
-{
+void TestFontService::resolveFamilyWalksCandidateChainInOrder() {
     if (QFontDatabase::families().isEmpty())
         QSKIP("系统未安装任何字体");
 
     FontService service;
     const QStringList installed = QFontDatabase::families();
     // Preferred missing → the first *installed* entry of the chain wins.
-    QCOMPARE(service.resolveFamily(QStringLiteral("ToolboxTestMissingFont"),
-                                   QStringList{QStringLiteral("ToolboxTestMissingSans"),
-                                               installed.at(0)}),
+    QCOMPARE(service.resolveFamily(
+                 QStringLiteral("ToolboxTestMissingFont"),
+                 QStringList{QStringLiteral("ToolboxTestMissingSans"), installed.at(0)}),
              installed.at(0));
 
     if (installed.size() >= 2) {
         // Two installed candidates: chain order decides, not QFontDatabase order.
-        QCOMPARE(service.resolveFamily(QString(),
-                                       QStringList{installed.at(1), installed.at(0)}),
+        QCOMPARE(service.resolveFamily(QString(), QStringList{installed.at(1), installed.at(0)}),
                  installed.at(1));
     }
 }
 
-void TestFontService::resolveFamilyUnknownFallsBackToPlatformDefault()
-{
+void TestFontService::resolveFamilyUnknownFallsBackToPlatformDefault() {
     FontService service;
     // Nothing installed among preferred + candidates → empty string, which the
     // caller maps to the platform default (app/fonts.py:6-7 SYSTEM_DEFAULT,
     // font_service.cpp:102-104). Works without any installed font.
-    QVERIFY(service.resolveFamily(QStringLiteral("ToolboxTestMissingFont"),
-                                  QStringList{QStringLiteral("ToolboxTestMissingSans"),
-                                              QStringLiteral("ToolboxTestMissingMono")})
+    QVERIFY(service
+                .resolveFamily(QStringLiteral("ToolboxTestMissingFont"),
+                               QStringList{QStringLiteral("ToolboxTestMissingSans"),
+                                           QStringLiteral("ToolboxTestMissingMono")})
                 .isEmpty());
     QVERIFY(service.resolveFamily(QString(), {}).isEmpty());
 }
 
-void TestFontService::diagnoseReportsUiAndMonoSections()
-{
+void TestFontService::diagnoseReportsUiAndMonoSections() {
     FontService service;
     const QVariantMap report = service.diagnose(QStringLiteral("ToolboxTestMissingFont"),
                                                 QStringLiteral("ToolboxTestMissingMono"), 13);
@@ -108,13 +103,11 @@ void TestFontService::diagnoseReportsUiAndMonoSections()
     const QVariantMap mono = report.value(QStringLiteral("mono")).toMap();
     QVERIFY(!ui.isEmpty());
     QVERIFY(!mono.isEmpty());
-    for (const QString &section : {QStringLiteral("requested"), QStringLiteral("resolved"),
-                                   QStringLiteral("size"), QStringLiteral("coverage"),
-                                   QStringLiteral("fallback")}) {
-        QVERIFY2(ui.contains(section),
-                 qPrintable(QStringLiteral("ui 缺少 %1").arg(section)));
-        QVERIFY2(mono.contains(section),
-                 qPrintable(QStringLiteral("mono 缺少 %1").arg(section)));
+    for (const QString &section :
+         {QStringLiteral("requested"), QStringLiteral("resolved"), QStringLiteral("size"),
+          QStringLiteral("coverage"), QStringLiteral("fallback")}) {
+        QVERIFY2(ui.contains(section), qPrintable(QStringLiteral("ui 缺少 %1").arg(section)));
+        QVERIFY2(mono.contains(section), qPrintable(QStringLiteral("mono 缺少 %1").arg(section)));
     }
 
     // The request is echoed verbatim; the size is applied to both roles.
@@ -128,17 +121,15 @@ void TestFontService::diagnoseReportsUiAndMonoSections()
     QCOMPARE(mono.value(QStringLiteral("size")).toInt(), 13);
 }
 
-void TestFontService::diagnoseCoverageHasFiveClasses()
-{
+void TestFontService::diagnoseCoverageHasFiveClasses() {
     FontService service;
-    const QVariantMap ui = service.diagnose(QString(), QString(), 11)
-                               .value(QStringLiteral("ui")).toMap();
+    const QVariantMap ui =
+        service.diagnose(QString(), QString(), 11).value(QStringLiteral("ui")).toMap();
     const QVariantMap coverage = ui.value(QStringLiteral("coverage")).toMap();
     const QVariantMap fallback = ui.value(QStringLiteral("fallback")).toMap();
 
     for (const QString &key : kCoverageClasses) {
-        QVERIFY2(coverage.contains(key),
-                 qPrintable(QStringLiteral("coverage 缺少 %1").arg(key)));
+        QVERIFY2(coverage.contains(key), qPrintable(QStringLiteral("coverage 缺少 %1").arg(key)));
         QVERIFY2(coverage.value(key).typeId() == QMetaType::Bool,
                  qPrintable(QStringLiteral("coverage.%1 不是布尔值").arg(key)));
     }
@@ -159,27 +150,31 @@ void TestFontService::diagnoseCoverageHasFiveClasses()
     }
 }
 
-void TestFontService::diagnoseFallsBackToDefaultSize()
-{
+void TestFontService::diagnoseFallsBackToDefaultSize() {
     FontService service;
     // resolve_size semantics (app/fonts.py:42-46): a non-positive size cannot
     // be applied and falls back to DEFAULT_SIZE = 11 (font_service.cpp:58-61).
     QCOMPARE(service.diagnose(QString(), QString(), 0)
-                 .value(QStringLiteral("ui")).toMap()
-                 .value(QStringLiteral("size")).toInt(),
+                 .value(QStringLiteral("ui"))
+                 .toMap()
+                 .value(QStringLiteral("size"))
+                 .toInt(),
              FontService::kDefaultFontSize);
     QCOMPARE(service.diagnose(QString(), QString(), -3)
-                 .value(QStringLiteral("mono")).toMap()
-                 .value(QStringLiteral("size")).toInt(),
+                 .value(QStringLiteral("mono"))
+                 .toMap()
+                 .value(QStringLiteral("size"))
+                 .toInt(),
              11);
 }
 
-void TestFontService::diagnoseFallbackListsAreBounded()
-{
+void TestFontService::diagnoseFallbackListsAreBounded() {
     FontService service;
     const QVariantMap fallback = service.diagnose(QString(), QString(), 11)
-                                     .value(QStringLiteral("mono")).toMap()
-                                     .value(QStringLiteral("fallback")).toMap();
+                                     .value(QStringLiteral("mono"))
+                                     .toMap()
+                                     .value(QStringLiteral("fallback"))
+                                     .toMap();
     const QStringList installed = QFontDatabase::families();
 
     for (auto it = fallback.constBegin(); it != fallback.constEnd(); ++it) {
@@ -189,14 +184,12 @@ void TestFontService::diagnoseFallbackListsAreBounded()
         for (const QString &family : families) {
             // Every fallback candidate must be a real installed family.
             QVERIFY2(installed.contains(family),
-                     qPrintable(QStringLiteral("%1 回退项 %2 未安装")
-                                    .arg(it.key(), family)));
+                     qPrintable(QStringLiteral("%1 回退项 %2 未安装").arg(it.key(), family)));
         }
     }
 }
 
-void TestFontService::applyToApplicationSetsAppFont()
-{
+void TestFontService::applyToApplicationSetsAppFont() {
     // applyToApplication mirrors app/fonts.py ui_font: it applies the request
     // to the whole application via QGuiApplication::setFont
     // (font_service.cpp:107-110); per-widget resolution happens later.

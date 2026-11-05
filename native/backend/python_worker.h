@@ -1,21 +1,20 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QObject>
 #include <QProcess>
 #include <QStringList>
-#include <QJsonObject>
 
 namespace toolbox {
 
 // One Python worker process: JSON Lines over stdin/stdout (docs/ipc-protocol.md §1).
 // Lifecycle/ownership/restart policy lives in BackendManager; this class only
 // owns the QProcess and the byte-stream framing.
-class PythonWorker : public QObject
-{
+class PythonWorker : public QObject {
     Q_OBJECT
 
-public:
+  public:
     explicit PythonWorker(QObject *parent = nullptr);
     ~PythonWorker() override;
 
@@ -33,7 +32,7 @@ public:
 
     QString lastStderrTail() const { return m_stderrTail; }
 
-signals:
+  signals:
     void responseReceived(const QString &requestId, const QJsonObject &message);
     void eventReceived(const QJsonObject &message);
     void protocolError(const QString &reason);
@@ -41,13 +40,13 @@ signals:
     void processExited(int exitCode, QProcess::ExitStatus status);
     void processError(QProcess::ProcessError error);
 
-private slots:
+  private slots:
     void onReadyReadStandardOutput();
     void onReadyReadStandardError();
     void onFinished(int exitCode, QProcess::ExitStatus status);
     void onErrorOccurred(QProcess::ProcessError error);
 
-private:
+  private:
     void dispatchFrame(const QByteArray &line);
 
     QProcess *m_process = nullptr;

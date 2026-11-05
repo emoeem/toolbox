@@ -22,8 +22,7 @@ constexpr int kCheckerCell = 8; // image pixels per checker cell
 
 // Checkerboard composited in image space: it represents pixel transparency,
 // so it must not scale differently from the image content.
-QImage compositeCheckerboard(const QImage &image)
-{
+QImage compositeCheckerboard(const QImage &image) {
     QImage canvas = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     QPainter painter(&canvas);
     painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
@@ -42,16 +41,13 @@ QImage compositeCheckerboard(const QImage &image)
 
 } // namespace
 
-ImageCanvas::ImageCanvas(QQuickItem *parent)
-    : QQuickItem(parent)
-{
+ImageCanvas::ImageCanvas(QQuickItem *parent) : QQuickItem(parent) {
     setFlag(ItemAcceptsDrops, true);
     setAcceptedMouseButtons(Qt::LeftButton);
     setAcceptHoverEvents(true);
 }
 
-void ImageCanvas::setSource(const QUrl &source)
-{
+void ImageCanvas::setSource(const QUrl &source) {
     if (m_source == source)
         return;
     m_source = source;
@@ -87,8 +83,7 @@ void ImageCanvas::setSource(const QUrl &source)
     update();
 }
 
-void ImageCanvas::setZoom(qreal zoom)
-{
+void ImageCanvas::setZoom(qreal zoom) {
     const qreal clamped = qBound(kMinZoom, zoom, kMaxZoom);
     if (qFuzzyCompare(clamped, m_zoom))
         return;
@@ -97,8 +92,7 @@ void ImageCanvas::setZoom(qreal zoom)
     update();
 }
 
-void ImageCanvas::setShowCheckerboard(bool show)
-{
+void ImageCanvas::setShowCheckerboard(bool show) {
     if (m_showCheckerboard == show)
         return;
     m_showCheckerboard = show;
@@ -108,27 +102,23 @@ void ImageCanvas::setShowCheckerboard(bool show)
         setSource(m_source);
 }
 
-void ImageCanvas::fitToWindow()
-{
+void ImageCanvas::fitToWindow() {
     const QSize size = m_imageSize;
     if (size.isEmpty() || width() <= 0 || height() <= 0)
         return;
-    const qreal fit = qMin(width() / qreal(size.width()),
-                           height() / qreal(size.height()));
-    m_panOffset = QPointF((width() - size.width() * fit) / 2.0,
-                          (height() - size.height() * fit) / 2.0);
+    const qreal fit = qMin(width() / qreal(size.width()), height() / qreal(size.height()));
+    m_panOffset =
+        QPointF((width() - size.width() * fit) / 2.0, (height() - size.height() * fit) / 2.0);
     setZoom(fit);
 }
 
-void ImageCanvas::setActualSize()
-{
-    m_panOffset = QPointF((width() - m_imageSize.width()) / 2.0,
-                          (height() - m_imageSize.height()) / 2.0);
+void ImageCanvas::setActualSize() {
+    m_panOffset =
+        QPointF((width() - m_imageSize.width()) / 2.0, (height() - m_imageSize.height()) / 2.0);
     setZoom(1.0);
 }
 
-void ImageCanvas::zoomBy(qreal factor)
-{
+void ImageCanvas::zoomBy(qreal factor) {
     if (m_imageSize.isEmpty())
         return;
     const QPointF center(width() / 2.0, height() / 2.0);
@@ -138,23 +128,19 @@ void ImageCanvas::zoomBy(qreal factor)
     update();
 }
 
-QRectF ImageCanvas::imageRect() const
-{
-    return QRectF(m_panOffset.x(), m_panOffset.y(),
-                  qreal(m_imageSize.width()) * m_zoom,
+QRectF ImageCanvas::imageRect() const {
+    return QRectF(m_panOffset.x(), m_panOffset.y(), qreal(m_imageSize.width()) * m_zoom,
                   qreal(m_imageSize.height()) * m_zoom);
 }
 
-QPointF ImageCanvas::mapToImage(const QPointF &itemPos) const
-{
+QPointF ImageCanvas::mapToImage(const QPointF &itemPos) const {
     if (m_imageSize.isEmpty() || m_zoom <= 0)
         return QPointF(-1, -1);
     return QPointF((itemPos.x() - m_panOffset.x()) / m_zoom,
                    (itemPos.y() - m_panOffset.y()) / m_zoom);
 }
 
-void ImageCanvas::emitMousePosition(const QPointF &itemPos)
-{
+void ImageCanvas::emitMousePosition(const QPointF &itemPos) {
     const QPointF imagePos = mapToImage(itemPos);
     if (imagePos == m_mousePosition)
         return;
@@ -162,8 +148,7 @@ void ImageCanvas::emitMousePosition(const QPointF &itemPos)
     emit mousePositionChanged();
 }
 
-QSGNode *ImageCanvas::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data)
-{
+QSGNode *ImageCanvas::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) {
     Q_UNUSED(data);
     auto *node = static_cast<QSGSimpleTextureNode *>(oldNode);
     if (!node) {
@@ -196,22 +181,19 @@ QSGNode *ImageCanvas::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *dat
     return node;
 }
 
-void ImageCanvas::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
-{
+void ImageCanvas::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size())
         fitToWindow();
 }
 
-void ImageCanvas::mousePressEvent(QMouseEvent *event)
-{
+void ImageCanvas::mousePressEvent(QMouseEvent *event) {
     m_dragging = true;
     m_lastDragPos = event->position();
     event->accept();
 }
 
-void ImageCanvas::mouseMoveEvent(QMouseEvent *event)
-{
+void ImageCanvas::mouseMoveEvent(QMouseEvent *event) {
     if (m_dragging) {
         const QPointF delta = event->position() - m_lastDragPos;
         m_lastDragPos = event->position();
@@ -222,26 +204,22 @@ void ImageCanvas::mouseMoveEvent(QMouseEvent *event)
     event->accept();
 }
 
-void ImageCanvas::mouseReleaseEvent(QMouseEvent *event)
-{
+void ImageCanvas::mouseReleaseEvent(QMouseEvent *event) {
     m_dragging = false;
     event->accept();
 }
 
-void ImageCanvas::mouseDoubleClickEvent(QMouseEvent *event)
-{
+void ImageCanvas::mouseDoubleClickEvent(QMouseEvent *event) {
     fitToWindow();
     event->accept();
 }
 
-void ImageCanvas::hoverMoveEvent(QHoverEvent *event)
-{
+void ImageCanvas::hoverMoveEvent(QHoverEvent *event) {
     emitMousePosition(event->position());
     event->accept();
 }
 
-void ImageCanvas::wheelEvent(QWheelEvent *event)
-{
+void ImageCanvas::wheelEvent(QWheelEvent *event) {
     const qreal delta = event->angleDelta().y();
     if (delta == 0 || m_imageSize.isEmpty())
         return;
@@ -256,8 +234,7 @@ void ImageCanvas::wheelEvent(QWheelEvent *event)
     event->accept();
 }
 
-void ImageCanvas::dragEnterEvent(QDragEnterEvent *event)
-{
+void ImageCanvas::dragEnterEvent(QDragEnterEvent *event) {
     if (event->mimeData()->hasUrls()) {
         event->acceptProposedAction();
         return;
@@ -265,8 +242,7 @@ void ImageCanvas::dragEnterEvent(QDragEnterEvent *event)
     event->ignore();
 }
 
-void ImageCanvas::dropEvent(QDropEvent *event)
-{
+void ImageCanvas::dropEvent(QDropEvent *event) {
     const auto urls = event->mimeData()->urls();
     if (urls.isEmpty())
         return;

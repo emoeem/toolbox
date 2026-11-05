@@ -7,23 +7,20 @@
 using toolbox::NavModel;
 using toolbox::ToolModel;
 
-class TestModels : public QObject
-{
+class TestModels : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     void toolModelRolesAndData();
     void toolModelIndexOfId();
     void navModelPageForId();
     void navModelRowCount();
 };
 
-void TestModels::toolModelRolesAndData()
-{
+void TestModels::toolModelRolesAndData() {
     ToolModel model;
-    model.addEntry({QStringLiteral("tool.ocr"), QStringLiteral("OCR"),
-                    QStringLiteral("文件工具"), false, QStringLiteral("P2"),
-                    QStringLiteral("ocr tesseract")});
+    model.addEntry({QStringLiteral("tool.ocr"), QStringLiteral("OCR"), QStringLiteral("文件工具"),
+                    false, QStringLiteral("P2"), QStringLiteral("ocr tesseract")});
     model.addEntry({QStringLiteral("tool.adjust"), QStringLiteral("调整"),
                     QStringLiteral("图像编辑"), true, QStringLiteral("P0"),
                     QStringLiteral("亮度 对比度")});
@@ -43,8 +40,7 @@ void TestModels::toolModelRolesAndData()
     QCOMPARE(roles.value(ToolModel::AvailableRole), QByteArray("available"));
 }
 
-void TestModels::toolModelIndexOfId()
-{
+void TestModels::toolModelIndexOfId() {
     ToolModel model;
     model.addEntry({QStringLiteral("a"), QStringLiteral("A"), {}, true, {}, {}});
     QCOMPARE(model.indexOfId(QStringLiteral("a")), 0);
@@ -56,14 +52,14 @@ void TestModels::toolModelIndexOfId()
     QVERIFY(model.get(99).isEmpty());
 }
 
-void TestModels::navModelPageForId()
-{
+void TestModels::navModelPageForId() {
     NavModel model;
     const QUrl page{QStringLiteral("qrc:/Toolbox/ui/pages/HomePage.qml")};
-    model.addEntry({QStringLiteral("home"), QStringLiteral("首页"), page, true, QStringLiteral("P0")});
+    model.addEntry(
+        {QStringLiteral("home"), QStringLiteral("首页"), page, true, QStringLiteral("P0")});
     model.addEntry({QStringLiteral("ai"), QStringLiteral("AI"),
-                    QUrl{QStringLiteral("qrc:/Toolbox/ui/pages/PlannedPage.qml")},
-                    false, QStringLiteral("P2")});
+                    QUrl{QStringLiteral("qrc:/Toolbox/ui/pages/PlannedPage.qml")}, false,
+                    QStringLiteral("P2")});
 
     QCOMPARE(model.pageForId(QStringLiteral("home")), page);
     QVERIFY(model.pageForId(QStringLiteral("missing")).isEmpty());
@@ -75,8 +71,7 @@ void TestModels::navModelPageForId()
     QCOMPARE(roles.value(NavModel::NavAvailableRole), QByteArray("available"));
 }
 
-void TestModels::navModelRowCount()
-{
+void TestModels::navModelRowCount() {
     NavModel model;
     QCOMPARE(model.rowCount(), 0);
     model.addEntry({QStringLiteral("x"), {}, {}, false, {}});

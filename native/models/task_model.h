@@ -17,31 +17,22 @@ class BackendManager;
 // response for a tracked request never produces a row. task.progress /
 // task.completed / task.failed events update the matching row; terminal rows
 // are trimmed to the most recent kMaxTerminalRows entries.
-class TaskModel : public QAbstractListModel
-{
+class TaskModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
-public:
+  public:
     static constexpr int kMaxTerminalRows = 64;
 
-    struct Entry
-    {
+    struct Entry {
         QString taskId;
         QString name;
-        QString status;    // queued|running|completed|failed|cancelled|cancelling
-        int progress = 0;  // percent, 0-100
+        QString status;   // queued|running|completed|failed|cancelled|cancelling
+        int progress = 0; // percent, 0-100
         QString error;
     };
 
-    enum Roles
-    {
-        TaskIdRole = Qt::UserRole + 1,
-        NameRole,
-        StatusRole,
-        ProgressRole,
-        ErrorRole
-    };
+    enum Roles { TaskIdRole = Qt::UserRole + 1, NameRole, StatusRole, ProgressRole, ErrorRole };
 
     explicit TaskModel(QObject *parent = nullptr);
 
@@ -60,17 +51,17 @@ public:
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-private slots:
+  private slots:
     void onResponseReady(const QString &requestId, const QJsonObject &message);
     void onTaskEvent(const QJsonObject &event);
 
-private:
+  private:
     int indexOfTaskId(const QString &taskId) const;
     void updateRow(int row, const QString &status, int progress, const QString &error);
     void trimTerminalRows();
 
     QVector<Entry> m_entries;
-    QHash<QString, QString> m_pendingNames;  // request_id → task name
+    QHash<QString, QString> m_pendingNames; // request_id → task name
     BackendManager *m_backend = nullptr;
 };
 

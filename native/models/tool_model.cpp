@@ -4,13 +4,9 @@ namespace toolbox {
 
 // ---- ToolModel -----------------------------------------------------------
 
-ToolModel::ToolModel(QObject *parent)
-    : QAbstractListModel(parent)
-{
-}
+ToolModel::ToolModel(QObject *parent) : QAbstractListModel(parent) {}
 
-int ToolModel::indexOfId(const QString &id) const
-{
+int ToolModel::indexOfId(const QString &id) const {
     for (int i = 0; i < m_entries.size(); ++i) {
         if (m_entries.at(i).id == id)
             return i;
@@ -18,8 +14,7 @@ int ToolModel::indexOfId(const QString &id) const
     return -1;
 }
 
-QVariantMap ToolModel::get(int row) const
-{
+QVariantMap ToolModel::get(int row) const {
     QVariantMap map;
     if (row < 0 || row >= m_entries.size())
         return map;
@@ -33,57 +28,55 @@ QVariantMap ToolModel::get(int row) const
     return map;
 }
 
-QVariantList ToolModel::search(const QString &query, int limit) const
-{
+QVariantList ToolModel::search(const QString &query, int limit) const {
     QVariantList results;
     if (query.isEmpty() || limit <= 0)
         return results;
     for (int row = 0; row < m_entries.size() && results.size() < limit; ++row) {
         const auto &entry = m_entries.at(row);
-        if (entry.title.contains(query, Qt::CaseInsensitive)
-                || entry.keywords.contains(query, Qt::CaseInsensitive)
-                || entry.category.contains(query, Qt::CaseInsensitive)) {
+        if (entry.title.contains(query, Qt::CaseInsensitive) ||
+            entry.keywords.contains(query, Qt::CaseInsensitive) ||
+            entry.category.contains(query, Qt::CaseInsensitive)) {
             results.append(get(row));
         }
     }
     return results;
 }
 
-int ToolModel::rowCount(const QModelIndex &parent) const
-{
+int ToolModel::rowCount(const QModelIndex &parent) const {
     return parent.isValid() ? 0 : m_entries.size();
 }
 
-QVariant ToolModel::data(const QModelIndex &index, int role) const
-{
+QVariant ToolModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.row() >= m_entries.size())
         return {};
     const auto &entry = m_entries.at(index.row());
     switch (role) {
-    case IdRole: return entry.id;
-    case TitleRole: return entry.title;
-    case CategoryRole: return entry.category;
-    case AvailableRole: return entry.available;
-    case PhaseRole: return entry.phase;
-    case KeywordsRole: return entry.keywords;
-    default: return {};
+    case IdRole:
+        return entry.id;
+    case TitleRole:
+        return entry.title;
+    case CategoryRole:
+        return entry.category;
+    case AvailableRole:
+        return entry.available;
+    case PhaseRole:
+        return entry.phase;
+    case KeywordsRole:
+        return entry.keywords;
+    default:
+        return {};
     }
 }
 
-QHash<int, QByteArray> ToolModel::roleNames() const
-{
+QHash<int, QByteArray> ToolModel::roleNames() const {
     return {
-        {IdRole, "toolId"},
-        {TitleRole, "title"},
-        {CategoryRole, "category"},
-        {AvailableRole, "available"},
-        {PhaseRole, "phase"},
-        {KeywordsRole, "keywords"},
+        {IdRole, "toolId"},           {TitleRole, "title"}, {CategoryRole, "category"},
+        {AvailableRole, "available"}, {PhaseRole, "phase"}, {KeywordsRole, "keywords"},
     };
 }
 
-void ToolModel::addEntry(const Entry &entry)
-{
+void ToolModel::addEntry(const Entry &entry) {
     beginInsertRows(QModelIndex(), m_entries.size(), m_entries.size());
     m_entries.append(entry);
     endInsertRows();
@@ -91,13 +84,9 @@ void ToolModel::addEntry(const Entry &entry)
 
 // ---- NavModel ------------------------------------------------------------
 
-NavModel::NavModel(QObject *parent)
-    : QAbstractListModel(parent)
-{
-}
+NavModel::NavModel(QObject *parent) : QAbstractListModel(parent) {}
 
-QUrl NavModel::pageForId(const QString &id) const
-{
+QUrl NavModel::pageForId(const QString &id) const {
     for (const auto &entry : m_entries) {
         if (entry.id == id)
             return entry.page;
@@ -105,8 +94,7 @@ QUrl NavModel::pageForId(const QString &id) const
     return {};
 }
 
-QVariantMap NavModel::get(int row) const
-{
+QVariantMap NavModel::get(int row) const {
     QVariantMap map;
     if (row < 0 || row >= m_entries.size())
         return map;
@@ -119,39 +107,39 @@ QVariantMap NavModel::get(int row) const
     return map;
 }
 
-int NavModel::rowCount(const QModelIndex &parent) const
-{
+int NavModel::rowCount(const QModelIndex &parent) const {
     return parent.isValid() ? 0 : m_entries.size();
 }
 
-QVariant NavModel::data(const QModelIndex &index, int role) const
-{
+QVariant NavModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.row() >= m_entries.size())
         return {};
     const auto &entry = m_entries.at(index.row());
     switch (role) {
-    case NavIdRole: return entry.id;
-    case NavTitleRole: return entry.title;
-    case NavPageRole: return entry.page;
-    case NavAvailableRole: return entry.available;
-    case NavPhaseRole: return entry.phase;
-    default: return {};
+    case NavIdRole:
+        return entry.id;
+    case NavTitleRole:
+        return entry.title;
+    case NavPageRole:
+        return entry.page;
+    case NavAvailableRole:
+        return entry.available;
+    case NavPhaseRole:
+        return entry.phase;
+    default:
+        return {};
     }
 }
 
-QHash<int, QByteArray> NavModel::roleNames() const
-{
+QHash<int, QByteArray> NavModel::roleNames() const {
     return {
-        {NavIdRole, "navId"},
-        {NavTitleRole, "title"},
-        {NavPageRole, "page"},
-        {NavAvailableRole, "available"},
+        {NavIdRole, "navId"},    {NavTitleRole, "title"},
+        {NavPageRole, "page"},   {NavAvailableRole, "available"},
         {NavPhaseRole, "phase"},
     };
 }
 
-void NavModel::addEntry(const Entry &entry)
-{
+void NavModel::addEntry(const Entry &entry) {
     beginInsertRows(QModelIndex(), m_entries.size(), m_entries.size());
     m_entries.append(entry);
     endInsertRows();
