@@ -70,71 +70,11 @@ jobs:
           os._exit(0 if result.wasSuccessful() else 1)
           PY
 
-      # 诊断（临时）：全量套件在退出期出现 heap corruption（exit 134），
-      # test_fonts 单独运行已排除。以下二分定位引入组合，定位后移除。
-      - name: "Diagnose: new test modules together"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_worker_protocol tests.test_engine_baseline -v > /tmp/diag1.log 2>&1 || true
-          tail -6 /tmp/diag1.log
-      - name: "Diagnose: fonts + main_window_static"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_main_window_static -v > /tmp/diag2.log 2>&1 || true
-          tail -6 /tmp/diag2.log
-      - name: "Diagnose: fonts + thread modules"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_task_and_history tests.test_workbench -v > /tmp/diag3.log 2>&1 || true
-          tail -6 /tmp/diag3.log
-      - name: "Diagnose: fonts + GL modules"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_shader_studio tests.test_texture_studio -v > /tmp/diag4.log 2>&1 || true
-          tail -6 /tmp/diag4.log
-      - name: "Diagnose: full suite under PYTHONMALLOC=debug"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen TOOLBOX_NO_NUMBA=1 PYTHONMALLOC=debug python -m unittest discover -s tests > /tmp/diag5.log 2>&1 || true
-          grep -E "Debug memory|block at|Extension modules|Fatal|Aborted|Current thread" /tmp/diag5.log | head -15 || tail -10 /tmp/diag5.log
-      - name: "Diagnose: fonts + task_and_history"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_task_and_history -v > /tmp/diagA.log 2>&1 || true
-          tail -4 /tmp/diagA.log
-      - name: "Diagnose: fonts + workbench"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_workbench -v > /tmp/diagB.log 2>&1 || true
-          tail -4 /tmp/diagB.log
-      - name: "Diagnose: task_and_history + workbench without fonts"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_task_and_history tests.test_workbench -v > /tmp/diagC.log 2>&1 || true
-          tail -4 /tmp/diagC.log
-      - name: "Diagnose: gdb backtrace of the crashing combo"
-        if: always()
-        run: |
-          sudo apt-get install -y --no-install-recommends gdb > /dev/null 2>&1
-          QT_QPA_PLATFORM=offscreen gdb -q -batch -ex run -ex "bt 25" --args python -m unittest tests.test_fonts tests.test_task_and_history tests.test_workbench > /tmp/diagG.log 2>&1 || true
-          tail -40 /tmp/diagG.log
-      - name: "Diagnose: faulthandler + PYTHONMALLOC=debug on crashing combo"
-        if: always()
-        run: |
-          QT_QPA_PLATFORM=offscreen PYTHONMALLOC=debug python -X faulthandler -m unittest tests.test_fonts tests.test_task_and_history tests.test_workbench > /tmp/diagF.log 2>&1 || true
-          grep -B2 -A25 "Fatal Python error\|Current thread" /tmp/diagF.log | head -45 || tail -20 /tmp/diagF.log
-      - name: "Diagnose: same combos on origin/main (control group)"
-        if: always()
-        run: |
-          git fetch origin main --depth=1
-          git worktree add /tmp/main-check origin/main
-          for combo in "tests.test_task_and_history tests.test_workbench"; do
-            echo "=== main: $combo ==="
-            cd /tmp/main-check
-            PYTHONPATH=/tmp/main-check QT_QPA_PLATFORM=offscreen python -m unittest $combo -v > /tmp/diagM.log 2>&1 || true
-            tail -25 /tmp/diagM.log
-            cd "$GITHUB_WORKSPACE"
-          done
+      # 诊断历史（2026-11-06 已定位并修复，步骤移除）：全量套件退出期
+      # heap corruption 为 main 上既有缺陷（无事件循环环境下解释器退出时
+      # PySide::destroyQCoreApplication 双重析构，gdb 证实；对照组复现）。
+      # 修复见 tests/test_task_and_history.py tearDownModule 注释与本文件
+      # 上一步的 os._exit 绕过。
 
       # ...and cover the accelerated paths as well.
       - name: Tests (numba JIT paths)
