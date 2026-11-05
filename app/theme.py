@@ -51,7 +51,6 @@ QLabel#histogramBox { border: 1px solid #45475a; }
 """
 
 LIGHT_QSS = _append_shared("""
-* { font-family: "MiSans", "MiSans Normal", "MiSans Regular", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; font-size: 13px; }
 QMainWindow, QWidget { background-color: #f7f7fb; color: #2b2d31; }
 QToolBar { background: #ffffff; border-bottom: 1px solid #d8dbe2; spacing: 4px; padding: 4px; }
 QToolBar QToolButton {
@@ -142,7 +141,6 @@ QSplitter::handle { background: #313244; width: 2px; }
 
 
 DARK_QSS = _append_shared("""
-* { font-family: "MiSans", "MiSans Normal", "MiSans Regular", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; font-size: 13px; }
 QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; }
 QToolBar { background: #181825; border-bottom: 1px solid #313244; spacing: 6px; padding: 7px 10px; }
 QToolBar QToolButton {
