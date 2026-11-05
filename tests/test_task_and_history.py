@@ -190,5 +190,20 @@ class TestHistoryAndSaving(unittest.TestCase):
         w.close()
 
 
+def tearDownModule():
+    """Exit-time double-delete workaround (gdb-confirmed on CI, pre-existing).
+
+    These tests build MainWindow/TaskQueueWidget/LogWidget and tear widgets
+    down via deleteLater() with no running event loop. At interpreter exit,
+    PySide::destroyQCoreApplication walks every surviving Python wrapper and
+    deletes it again -- the SIGSEGV lands in QObject::~QObject under
+    Shiboken::BindingManager::visitAllPyObjects. Collecting the wrappers here,
+    while the QCoreApplication is still alive, avoids that double delete.
+    """
+    import gc
+
+    gc.collect()
+
+
 if __name__ == "__main__":
     unittest.main()
