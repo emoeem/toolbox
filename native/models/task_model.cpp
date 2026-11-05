@@ -118,6 +118,10 @@ void TaskModel::onTaskEvent(const QJsonObject &event) {
 
 void TaskModel::updateRow(int row, const QString &status, int progress, const QString &error) {
     Entry &entry = m_entries[row];
+    // 值未变化时不发射：无数字字段的 task.progress 落到"保持原值"路径，对
+    // QML 视图而言这次刷新是空操作（test_task_model 把该行为固化为契约）。
+    if (entry.status == status && entry.progress == progress && entry.error == error)
+        return;
     entry.status = status;
     entry.progress = progress;
     entry.error = error;

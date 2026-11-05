@@ -18,6 +18,13 @@ ApplicationWindow {
     title: qsTr("Toolbox 2.0")
     color: Theme.background
 
+    // 全局退出快捷键（phase4-acceptance §3 验收项；applicationWindow 自带
+    // 关闭流程会触发真实窗口关闭，不绕过未保存文档检查）。
+    Shortcut {
+        sequence: "Ctrl+Q"
+        onActivated: window.close()
+    }
+
     // Theme index of the persisted mode: dark=0 / light=1 / system=2.
     function themeIndex() {
         const mode = SettingsService.themeMode;

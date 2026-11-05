@@ -239,12 +239,15 @@ Column {
         }
     }
 
-    // Wheel stepping overlay: NoButton keeps click/hover pass-through; steps
-    // via nudge() because SpinBox.increase() would not emit valueModified.
+    // Wheel stepping overlay: NoButton keeps click pass-through, and
+    // hoverEnabled stays false so the SpinBox's own up/down hover indicators
+    // still receive hover (评审修正：MouseArea 悬停会阻断下层 item 的 hover);
+    // wheel delivery does not depend on hoverEnabled. Steps via nudge()
+    // because SpinBox.increase() would not emit valueModified.
     MouseArea {
         anchors.fill: spinBox
         acceptedButtons: Qt.NoButton
-        hoverEnabled: true
+        hoverEnabled: false
         onWheel: (wheel) => {
             if (!spinBox.enabled)
                 return;

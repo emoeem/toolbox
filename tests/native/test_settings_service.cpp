@@ -163,8 +163,10 @@ void TestSettingsService::unchangedWriteDoesNotNotify() {
 void TestSettingsService::corruptStoreFallsBackToDefaults() {
     {
         // Values written directly into the store (unreadable types), mirroring
-        // app/fonts.py resolve_size's unreadable-value path.
-        QSettings raw(QStringLiteral("Emo"), QStringLiteral("Toolbox2"));
+        // app/fonts.py resolve_size's unreadable-value path. IniFormat explicit:
+        // the service constructs its store with IniFormat (see settings_service.cpp).
+        QSettings raw(QSettings::IniFormat, QSettings::UserScope,
+                      QStringLiteral("Emo"), QStringLiteral("Toolbox2"));
         raw.setValue(QStringLiteral("font/size"), QStringLiteral("abc"));
         raw.setValue(QStringLiteral("preview/quality"), QStringLiteral("not-a-number"));
         raw.setValue(QStringLiteral("appearance/themeMode"), QStringLiteral("purple"));
