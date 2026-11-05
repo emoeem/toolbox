@@ -67,6 +67,21 @@ jobs:
         run: |
           QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_main_window_static -v > /tmp/diag2.log 2>&1 || true
           tail -6 /tmp/diag2.log
+      - name: "Diagnose: fonts + thread modules"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_task_and_history tests.test_workbench -v > /tmp/diag3.log 2>&1 || true
+          tail -6 /tmp/diag3.log
+      - name: "Diagnose: fonts + GL modules"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_shader_studio tests.test_texture_studio -v > /tmp/diag4.log 2>&1 || true
+          tail -6 /tmp/diag4.log
+      - name: "Diagnose: full suite under PYTHONMALLOC=debug"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen TOOLBOX_NO_NUMBA=1 PYTHONMALLOC=debug python -m unittest discover -s tests > /tmp/diag5.log 2>&1 || true
+          grep -E "Debug memory|block at|Extension modules|Fatal|Aborted|Current thread" /tmp/diag5.log | head -15 || tail -10 /tmp/diag5.log
 
       # ...and cover the accelerated paths as well.
       - name: Tests (numba JIT paths)
