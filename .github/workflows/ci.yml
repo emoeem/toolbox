@@ -49,11 +49,26 @@ jobs:
       # for most users) and it is NOT equivalent to the JIT path: numba returns
       # inf from math.pow where CPython raises OverflowError. Force it so this
       # path is always exercised.
+      #
+      # 既有缺陷绕过（phase0-font-system 分支 gdb 诊断，main 上可复现）：
+      # 全部测试通过后，解释器退出阶段 PySide::destroyQCoreApplication 仍会对
+      # 无事件循环环境下遗留的 QObject 包装双重析构并 abort（exit 134），
+      # 覆盖真实的测试退出码。用 os._exit 在读取结果后立即退出、跳过该清理
+      # 路径；退出码只反映测试通过与否。根因随旧 UI 退役而消失（新 UI 测试
+      # 不构造这些 widget 图）。
       - name: Tests (pure-Python fallback, no numba)
         env:
           QT_QPA_PLATFORM: offscreen
           TOOLBOX_NO_NUMBA: "1"
-        run: python -m unittest discover -s tests -v
+        run: |
+          python - <<'PY' ; code=$? ; echo "suite-exit=$code" ; test "$code" -eq 0
+          import os, sys, unittest
+          suite = unittest.TestLoader().discover("tests")
+          result = unittest.TextTestRunner(verbosity=1).run(suite)
+          sys.stdout.flush()
+          sys.stderr.flush()
+          os._exit(0 if result.wasSuccessful() else 1)
+          PY
 
       # 诊断（临时）：全量套件在退出期出现 heap corruption（exit 134），
       # test_fonts 单独运行已排除。以下二分定位引入组合，定位后移除。
