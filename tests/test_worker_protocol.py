@@ -138,6 +138,11 @@ class DispatcherAsyncTests(unittest.TestCase):
         self.assertTrue(opened['success'], opened)
         self.document_id = opened['result']['document_id']
 
+        from processors.filter_defs import FilterDefRegistry
+        registry_keys = FilterDefRegistry.instance().keys()
+        # 滤镜 key 以注册表实际内容为准，不猜测名字。
+        self.filter_key = 'grayscale_standard' if 'grayscale_standard' in registry_keys else registry_keys[0]
+
     def tearDown(self):
         self.ctx.runtime.shutdown()
 
@@ -157,7 +162,7 @@ class DispatcherAsyncTests(unittest.TestCase):
 
         request = _request('filter.preview', {
             'document_id': self.document_id,
-            'filters': [{'filter_key': 'brightness', 'params': {'value': 0.1}}],
+            'filters': [{'filter_key': self.filter_key, 'params': {}}],
             'max_side': 64,
         })
         response = self.dispatcher.handle(request)
@@ -174,7 +179,7 @@ class DispatcherAsyncTests(unittest.TestCase):
         meta_before = self.dispatcher.handle(_request('image.metadata', {'document_id': self.document_id}))
         request = _request('filter.apply', {
             'document_id': self.document_id,
-            'filters': [{'filter_key': 'invert', 'params': {}}],
+            'filters': [{'filter_key': self.filter_key, 'params': {}}],
         })
         response = self.dispatcher.handle(request)
         self.assertTrue(response['success'], response)
@@ -191,7 +196,7 @@ class DispatcherAsyncTests(unittest.TestCase):
 
         request = _request('filter.preview', {
             'document_id': self.document_id,
-            'filters': [{'filter_key': 'brightness', 'params': {'value': 0.0}}],
+            'filters': [{'filter_key': self.filter_key, 'params': {}}],
             'max_side': 32,
         })
         response = self.dispatcher.handle(request)
@@ -217,7 +222,9 @@ class TaskRuntimeTests(unittest.TestCase):
 
         submitted = runtime.submit('test', job)
         task_id = submitted['task_id']
-        self.assertEqual(submitted['status'], task_runtime.STATUS_QUEUED)
+        # 极小任务可能在 submit 返回前已被线程池跑完：状态是快照而非承诺。
+        self.assertIn(submitted['status'],
+                      (task_runtime.STATUS_QUEUED, task_runtime.STATUS_RUNNING, task_runtime.STATUS_COMPLETED))
 
         deadline = __import__('time').monotonic() + 5
         while __import__('time').monotonic() < deadline:

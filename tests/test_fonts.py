@@ -134,11 +134,9 @@ class MonoFontTests(unittest.TestCase):
 
     def test_mono_used_by_shader_editor(self):
         from app.panels.shader_studio import LineEditor
+        # 无事件循环的测试环境：不调用 deleteLater（无人处理会与 Python GC 双重管理）。
         editor = LineEditor(mono_font(_settings()))
-        try:
-            self.assertEqual(editor.font().styleHint(), QFont.Monospace)
-        finally:
-            editor.deleteLater()
+        self.assertEqual(editor.font().styleHint(), QFont.Monospace)
 
 
 class FontDiagnosticTests(unittest.TestCase):
