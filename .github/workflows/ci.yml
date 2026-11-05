@@ -82,6 +82,27 @@ jobs:
         run: |
           QT_QPA_PLATFORM=offscreen TOOLBOX_NO_NUMBA=1 PYTHONMALLOC=debug python -m unittest discover -s tests > /tmp/diag5.log 2>&1 || true
           grep -E "Debug memory|block at|Extension modules|Fatal|Aborted|Current thread" /tmp/diag5.log | head -15 || tail -10 /tmp/diag5.log
+      - name: "Diagnose: fonts + task_and_history"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_task_and_history -v > /tmp/diagA.log 2>&1 || true
+          tail -4 /tmp/diagA.log
+      - name: "Diagnose: fonts + workbench"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_fonts tests.test_workbench -v > /tmp/diagB.log 2>&1 || true
+          tail -4 /tmp/diagB.log
+      - name: "Diagnose: task_and_history + workbench without fonts"
+        if: always()
+        run: |
+          QT_QPA_PLATFORM=offscreen python -m unittest tests.test_task_and_history tests.test_workbench -v > /tmp/diagC.log 2>&1 || true
+          tail -4 /tmp/diagC.log
+      - name: "Diagnose: gdb backtrace of the crashing combo"
+        if: always()
+        run: |
+          sudo apt-get install -y --no-install-recommends gdb > /dev/null 2>&1
+          QT_QPA_PLATFORM=offscreen gdb -q -batch -ex run -ex "bt 25" --args python -m unittest tests.test_fonts tests.test_task_and_history tests.test_workbench > /tmp/diagG.log 2>&1 || true
+          grep -A28 "SIGABRT\|Program received" /tmp/diagG.log | head -35
 
       # ...and cover the accelerated paths as well.
       - name: Tests (numba JIT paths)
