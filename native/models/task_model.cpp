@@ -1,5 +1,7 @@
 #include "task_model.h"
 
+// 连接 BackendManager 的信号需要完整类型（task_model.h 只有前置声明）。
+#include "backend/backend_manager.h"
 #include "backend/ipc_protocol.h"
 
 namespace toolbox {
