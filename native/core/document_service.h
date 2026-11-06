@@ -142,7 +142,17 @@ class DocumentService : public QObject {
     void onTaskEvent(const QJsonObject &event);
 
   private:
-    enum class PendingKind { Open, Save, Adjust, Transform, ApplyFilters, Undo, Redo, Reset, History };
+    enum class PendingKind {
+        Open,
+        Save,
+        Adjust,
+        Transform,
+        ApplyFilters,
+        Undo,
+        Redo,
+        Reset,
+        History
+    };
 
     struct Pending {
         PendingKind kind = PendingKind::Open;

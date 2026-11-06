@@ -198,12 +198,14 @@ void DocumentService::applyFilters(const QJsonArray &steps, bool preview, int ma
     // 恰好一次失败上报，QML 在途门控才有唯一的解除路径。
     if (steps.isEmpty()) {
         emit documentError(QStringLiteral("INVALID_PARAMS"), QStringLiteral("滤镜链为空"));
-        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::ApplyFilters, preview));
+        emit documentActionFailed(m_currentDocumentId,
+                                  actionId(PendingKind::ApplyFilters, preview));
         return;
     }
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
-        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::ApplyFilters, preview));
+        emit documentActionFailed(m_currentDocumentId,
+                                  actionId(PendingKind::ApplyFilters, preview));
         return;
     }
     // filter.preview/apply 的 steps 参数（docs/ipc-protocol.md §3）：数组原样

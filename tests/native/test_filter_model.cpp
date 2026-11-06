@@ -75,7 +75,8 @@ class TestFilterModel : public QObject {
     static QModelIndex found(const QAbstractItemModel &model, int role, const QString &value);
 };
 
-QModelIndex TestFilterModel::found(const QAbstractItemModel &model, int role, const QString &value) {
+QModelIndex TestFilterModel::found(const QAbstractItemModel &model, int role,
+                                   const QString &value) {
     for (int row = 0; row < model.rowCount(); ++row) {
         if (model.index(row, 0).data(role).toString() == value)
             return model.index(row, 0);
@@ -104,13 +105,13 @@ void TestFilterModel::reloadFromParsesProtocolShape() {
     QAbstractItemModelTester tester(&model);
     QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
 
-    model.reloadFrom(filterListResult(
-        {filterEntry(QStringLiteral("gaussian_blur"), QStringLiteral("高斯模糊"),
-                     QStringLiteral("blur"), QStringLiteral("模糊"), true, {},
-                     QStringLiteral("经典高斯核模糊")),
-         filterEntry(QStringLiteral("gmic_relight"), QStringLiteral("G'MIC 光影"),
-                     QStringLiteral("lighting"), QStringLiteral("光影"), false,
-                     {QStringLiteral("gmic")}, QStringLiteral("需要 G'MIC"))}));
+    model.reloadFrom(
+        filterListResult({filterEntry(QStringLiteral("gaussian_blur"), QStringLiteral("高斯模糊"),
+                                      QStringLiteral("blur"), QStringLiteral("模糊"), true, {},
+                                      QStringLiteral("经典高斯核模糊")),
+                          filterEntry(QStringLiteral("gmic_relight"), QStringLiteral("G'MIC 光影"),
+                                      QStringLiteral("lighting"), QStringLiteral("光影"), false,
+                                      {QStringLiteral("gmic")}, QStringLiteral("需要 G'MIC"))}));
     QCOMPARE(resetSpy.count(), 1);
     QCOMPARE(model.rowCount(), 2);
 
@@ -142,9 +143,9 @@ void TestFilterModel::reloadFromClearsAndReplaces() {
     FilterModel model;
     QAbstractItemModelTester tester(&model);
 
-    model.reloadFrom(filterListResult({filterEntry(QStringLiteral("a"), QStringLiteral("甲"),
-                                                   QStringLiteral("blur"), QStringLiteral("模糊"),
-                                                   true, {}, {})}));
+    model.reloadFrom(filterListResult(
+        {filterEntry(QStringLiteral("a"), QStringLiteral("甲"), QStringLiteral("blur"),
+                     QStringLiteral("模糊"), true, {}, {})}));
     QCOMPARE(model.rowCount(), 1);
 
     // 空对象 / 缺 filters 字段 = 清空（HistoryModel::refreshFrom 同款语义）。
@@ -188,15 +189,17 @@ void TestFilterModel::searchMatchesTitleAndKeywords() {
          filterEntry(QStringLiteral("gmic_relight"), QStringLiteral("G'MIC 光影"),
                      QStringLiteral("lighting"), QStringLiteral("光影"), false,
                      {QStringLiteral("gmic")}, QStringLiteral("依赖 G'MIC 引擎")),
-         filterEntry(QStringLiteral("vignette"), QStringLiteral("暗角"),
-                     QStringLiteral("stylize"), QStringLiteral("风格化"), true, {},
-                     QStringLiteral("边缘压暗"))}));
+         filterEntry(QStringLiteral("vignette"), QStringLiteral("暗角"), QStringLiteral("stylize"),
+                     QStringLiteral("风格化"), true, {}, QStringLiteral("边缘压暗"))}));
 
     // title 匹配（显示名）。
     QCOMPARE(model.search(QStringLiteral("暗角")).size(), 1);
     // key 匹配（关键词）。
     QCOMPARE(model.search(QStringLiteral("relight")).size(), 1);
-    QCOMPARE(model.search(QStringLiteral("relight")).first().toMap().value(QStringLiteral("key"))
+    QCOMPARE(model.search(QStringLiteral("relight"))
+                 .first()
+                 .toMap()
+                 .value(QStringLiteral("key"))
                  .toString(),
              QStringLiteral("gmic_relight"));
     // category_label 匹配："风格化"只命中暗角。
@@ -232,10 +235,9 @@ void TestFilterModel::searchCaseInsensitiveAndEmptyQuery() {
 void TestFilterModel::dataOnInvalidIndexes() {
     FilterModel model;
     QAbstractItemModelTester tester(&model);
-    model.reloadFrom(filterListResult(
-        {filterEntry(QStringLiteral("gaussian_blur"), QStringLiteral("高斯模糊"),
-                     QStringLiteral("blur"), QStringLiteral("模糊"), true, {},
-                     QStringLiteral("经典高斯核模糊"))}));
+    model.reloadFrom(filterListResult({filterEntry(
+        QStringLiteral("gaussian_blur"), QStringLiteral("高斯模糊"), QStringLiteral("blur"),
+        QStringLiteral("模糊"), true, {}, QStringLiteral("经典高斯核模糊"))}));
     QCOMPARE(model.rowCount(), 1);
 
     // 扁平表契约（TaskModel::trackedResponseCreatesRow 同款）：负行/越界行/

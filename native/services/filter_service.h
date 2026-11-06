@@ -139,7 +139,7 @@ class FilterService : public QObject {
     FilterModel *m_filterModel = nullptr;
     FilterChainModel *m_chainModel = nullptr;
     QHash<QString, Pending> m_pendingByRequest; // request_id → 提交上下文
-    QVariantList m_presets; // 最近一次 filter.presets.list 的缓存
+    QVariantList m_presets;                     // 最近一次 filter.presets.list 的缓存
     bool m_loadingFilters = false;
 };
 

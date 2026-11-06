@@ -89,12 +89,12 @@ QJsonObject failedResponse(const QString &requestId, const QString &code, const 
 // docs/ipc-protocol.md §3 image.open：sync，result 携带 document_id。
 QJsonObject openSuccessResponse(const QString &requestId, const QString &documentId) {
     return successResponse(requestId, QJsonObject{
-                                           {QStringLiteral("document_id"), documentId},
-                                           {QStringLiteral("width"), 640},
-                                           {QStringLiteral("height"), 480},
-                                           {QStringLiteral("format"), QStringLiteral("PNG")},
-                                           {QStringLiteral("file_size"), 4096},
-                                       });
+                                          {QStringLiteral("document_id"), documentId},
+                                          {QStringLiteral("width"), 640},
+                                          {QStringLiteral("height"), 480},
+                                          {QStringLiteral("format"), QStringLiteral("PNG")},
+                                          {QStringLiteral("file_size"), 4096},
+                                      });
 }
 
 // docs/ipc-protocol.md §2.3：异步动作受理响应。
@@ -280,9 +280,9 @@ void TestFilterService::filterListFailureResetsLoading() {
 
     const int n = probeSlot(m_backend);
     service.loadFilters();
-    emit m_backend.responseReady(reqId(n + 1),
-                                 failedResponse(reqId(n + 1), QStringLiteral("INTERNAL"),
-                                                QStringLiteral("worker 异常")));
+    emit m_backend.responseReady(
+        reqId(n + 1),
+        failedResponse(reqId(n + 1), QStringLiteral("INTERNAL"), QStringLiteral("worker 异常")));
 
     // 失败响应同样收在途标志（否则 loadingFilters 永真，页面卡加载态）。
     QCOMPARE(service.loadingFilters(), false);
@@ -346,35 +346,36 @@ void TestFilterService::presetsRoundTrip() {
                                   QJsonObject{{QStringLiteral("radius"), 3}});
     service.chainModel()->addStep(QStringLiteral("vignette"));
     service.savePreset(QStringLiteral("链A"));
-    emit m_backend.responseReady(reqId(n + 3),
-                                 successResponse(reqId(n + 3), QJsonObject{
-                                                                    {QStringLiteral("saved"), true},
-                                                                    {QStringLiteral("name"),
-                                                                     QStringLiteral("链A")},
-                                                                }));
+    emit m_backend.responseReady(
+        reqId(n + 3),
+        successResponse(reqId(n + 3), QJsonObject{
+                                          {QStringLiteral("saved"), true},
+                                          {QStringLiteral("name"), QStringLiteral("链A")},
+                                      }));
     QCOMPARE(saved.count(), 1);
     QCOMPARE(saved.at(0).at(0).toString(), QStringLiteral("链A"));
-    emit m_backend.responseReady(reqId(n + 4),
-                                 successResponse(reqId(n + 4),
-                                                 presetsResult({QStringLiteral("链A"),
-                                                                QStringLiteral("链B")})));
+    emit m_backend.responseReady(
+        reqId(n + 4), successResponse(reqId(n + 4), presetsResult({QStringLiteral("链A"),
+                                                                   QStringLiteral("链B")})));
     QCOMPARE(presetsChanged.count(), 3); // save 成功后的自动刷新
 
     // 3) loadPreset：响应 {name, steps}（§3.4）写入 chainModel 并经
     // presetLoaded 交付（fire-and-forget 下这是 steps 的唯一同步可观察路径）。
     QSignalSpy loaded(&service, &FilterService::presetLoaded);
     service.loadPreset(QStringLiteral("链A"));
-    emit m_backend.responseReady(reqId(n + 5), successResponse(reqId(n + 5),
-                                                               QJsonObject{{QStringLiteral("name"),
-                                                                            QStringLiteral("链A")},
-                                                                           {QStringLiteral("steps"),
-                                                                            presetStepsResult()}}));
+    emit m_backend.responseReady(
+        reqId(n + 5),
+        successResponse(reqId(n + 5), QJsonObject{{QStringLiteral("name"), QStringLiteral("链A")},
+                                                  {QStringLiteral("steps"), presetStepsResult()}}));
     QCOMPARE(loaded.count(), 1);
     QCOMPARE(loaded.at(0).at(0).value<QVariantList>().size(), 2);
     QCOMPARE(service.chainModel()->stepCount(), 2);
-    QCOMPARE(service.chainModel()->index(0, 0).data(FilterChainModel::ChainFilterKeyRole).toString(),
-             QStringLiteral("sepia"));
-    QCOMPARE(service.chainModel()->index(0, 0).data(FilterChainModel::ChainParamsRole)
+    QCOMPARE(
+        service.chainModel()->index(0, 0).data(FilterChainModel::ChainFilterKeyRole).toString(),
+        QStringLiteral("sepia"));
+    QCOMPARE(service.chainModel()
+                 ->index(0, 0)
+                 .data(FilterChainModel::ChainParamsRole)
                  .value<QJsonObject>()
                  .value(QStringLiteral("intensity"))
                  .toDouble(),
@@ -385,9 +386,9 @@ void TestFilterService::presetsRoundTrip() {
     // 4) deletePreset：成功信号 + 自动刷新缓存。
     QSignalSpy deleted(&service, &FilterService::presetDeleted);
     service.deletePreset(QStringLiteral("链A"));
-    emit m_backend.responseReady(reqId(n + 6), successResponse(
-                                                   reqId(n + 6),
-                                                   QJsonObject{{QStringLiteral("deleted"), true}}));
+    emit m_backend.responseReady(
+        reqId(n + 6),
+        successResponse(reqId(n + 6), QJsonObject{{QStringLiteral("deleted"), true}}));
     QCOMPARE(deleted.count(), 1);
     QCOMPARE(deleted.at(0).at(0).toString(), QStringLiteral("链A"));
     emit m_backend.responseReady(
@@ -439,8 +440,10 @@ void TestFilterService::previewAndApplyChainDelegate() {
     // 真实链路：DocumentService::instance() 经 applyFilters 提交 filter 链。
     QSignalSpy docOpened(DocumentService::instance(), &DocumentService::documentOpened);
     QSignalSpy previewReady(DocumentService::instance(), &DocumentService::previewReady);
-    QSignalSpy versionChanged(DocumentService::instance(), &DocumentService::documentVersionChanged);
-    QSignalSpy modifiedChanged(DocumentService::instance(), &DocumentService::documentModifiedChanged);
+    QSignalSpy versionChanged(DocumentService::instance(),
+                              &DocumentService::documentVersionChanged);
+    QSignalSpy modifiedChanged(DocumentService::instance(),
+                               &DocumentService::documentModifiedChanged);
     QSignalSpy actionFailed(DocumentService::instance(), &DocumentService::documentActionFailed);
 
     // 任务行登记：异步 filter 链动作也进 TaskModel，任务名"滤镜链"（任务清单）。
@@ -451,9 +454,10 @@ void TestFilterService::previewAndApplyChainDelegate() {
 
     // 打开文档（image.open，sync）。
     const int n = probeSlot(m_backend);
-    DocumentService::instance()->openDocument(QUrl::fromLocalFile(QStringLiteral("/tmp/chain.png")));
-    emit m_backend.responseReady(reqId(n + 1), openSuccessResponse(reqId(n + 1),
-                                                                   QStringLiteral("doc-fx")));
+    DocumentService::instance()->openDocument(
+        QUrl::fromLocalFile(QStringLiteral("/tmp/chain.png")));
+    emit m_backend.responseReady(reqId(n + 1),
+                                 openSuccessResponse(reqId(n + 1), QStringLiteral("doc-fx")));
     QCOMPARE(docOpened.count(), 1);
     QCOMPARE(DocumentService::instance()->currentDocumentId(), QStringLiteral("doc-fx"));
     QCOMPARE(DocumentService::instance()->currentVersion(), 0);
@@ -466,20 +470,19 @@ void TestFilterService::previewAndApplyChainDelegate() {
 
     // previewChain(384)：filter.preview 任务（§3 预览不递增版本，§3.1）。
     service.previewChain(384);
-    emit m_backend.responseReady(reqId(n + 2), asyncAcceptedResponse(reqId(n + 2),
-                                                                     QStringLiteral("task-p")));
+    emit m_backend.responseReady(reqId(n + 2),
+                                 asyncAcceptedResponse(reqId(n + 2), QStringLiteral("task-p")));
     QCOMPARE(taskModel.rowCount(), 1); // 受理即建行（§2.3，trackRequest"滤镜链"）
     QCOMPARE(taskModel.index(0, 0).data(TaskModel::NameRole).toString(), QStringLiteral("滤镜链"));
-    emit m_backend.taskEvent(completedEvent(QStringLiteral("task-p"),
-                                            QJsonObject{
-                                                {QStringLiteral("path"),
-                                                 QStringLiteral("/tmp/toolbox-worker-1/prev.png")},
-                                                {QStringLiteral("width"), 384},
-                                                {QStringLiteral("height"), 256},
-                                                {QStringLiteral("sha256"), QStringLiteral("abc")},
-                                                {QStringLiteral("preview_of"),
-                                                 QStringLiteral("doc-fx")},
-                                            }));
+    emit m_backend.taskEvent(completedEvent(
+        QStringLiteral("task-p"),
+        QJsonObject{
+            {QStringLiteral("path"), QStringLiteral("/tmp/toolbox-worker-1/prev.png")},
+            {QStringLiteral("width"), 384},
+            {QStringLiteral("height"), 256},
+            {QStringLiteral("sha256"), QStringLiteral("abc")},
+            {QStringLiteral("preview_of"), QStringLiteral("doc-fx")},
+        }));
     QCOMPARE(previewReady.count(), 1);
     QCOMPARE(DocumentService::instance()->currentVersion(), 0); // 预览不递增
     QVERIFY(!DocumentService::instance()->documentModified());
@@ -487,16 +490,16 @@ void TestFilterService::previewAndApplyChainDelegate() {
     // applyChain()：filter.apply 全分辨率（§3.1：version += 1、modified=true；
     // result 无像素文件 → 不发 previewReady）。
     service.applyChain();
-    emit m_backend.responseReady(reqId(n + 3), asyncAcceptedResponse(reqId(n + 3),
-                                                                     QStringLiteral("task-a")));
+    emit m_backend.responseReady(reqId(n + 3),
+                                 asyncAcceptedResponse(reqId(n + 3), QStringLiteral("task-a")));
     QCOMPARE(taskModel.rowCount(), 2); // 第二行：全分辨率滤镜链
     QCOMPARE(taskModel.index(1, 0).data(TaskModel::NameRole).toString(), QStringLiteral("滤镜链"));
-    emit m_backend.taskEvent(completedEvent(QStringLiteral("task-a"),
-                                            QJsonObject{
-                                                {QStringLiteral("version"), 1},
-                                                {QStringLiteral("width"), 640},
-                                                {QStringLiteral("height"), 480},
-                                            }));
+    emit m_backend.taskEvent(
+        completedEvent(QStringLiteral("task-a"), QJsonObject{
+                                                     {QStringLiteral("version"), 1},
+                                                     {QStringLiteral("width"), 640},
+                                                     {QStringLiteral("height"), 480},
+                                                 }));
     QCOMPARE(DocumentService::instance()->currentVersion(), 1);
     QCOMPARE(versionChanged.count(), 1);
     QCOMPARE(versionChanged.at(0).at(0).toInt(), 1);

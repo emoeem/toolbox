@@ -51,7 +51,8 @@ QString FilterService::sendTracked(PendingKind kind, const QString &action,
         // BackendManager::errorOccurred 的 WORKER_START_FAILED 只覆盖进程层面；
         // 这里是调用层面未接线，归入未分类的内部错误（§5，document_service.cpp
         // 同款处置）。本次调用未发出，但 QML 可能已按"已提交"置位——如实上报。
-        emit filterError(QStringLiteral("INTERNAL"), QStringLiteral("后端未绑定，无法执行滤镜操作"));
+        emit filterError(QStringLiteral("INTERNAL"),
+                         QStringLiteral("后端未绑定，无法执行滤镜操作"));
         return {};
     }
     const QString requestId = m_backend->sendAction(action, params);

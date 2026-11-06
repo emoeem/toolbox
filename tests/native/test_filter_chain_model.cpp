@@ -21,8 +21,8 @@ namespace {
 QJsonObject step(const QString &key, bool enabled = true) {
     return QJsonObject{
         {QStringLiteral("filter_key"), key},
-        {QStringLiteral("params"),
-         QJsonObject{{QStringLiteral("radius"), 3}, {QStringLiteral("label"), QStringLiteral("x")}}},
+        {QStringLiteral("params"), QJsonObject{{QStringLiteral("radius"), 3},
+                                               {QStringLiteral("label"), QStringLiteral("x")}}},
         {QStringLiteral("enabled"), enabled},
     };
 }
@@ -132,8 +132,7 @@ void TestFilterChainModel::addStepAppendsAndNotifiesCount() {
     QAbstractItemModelTester tester(&model);
     QSignalSpy countSpy(&model, &FilterChainModel::stepCountChanged);
 
-    model.addStep(QStringLiteral("gaussian_blur"),
-                  QJsonObject{{QStringLiteral("radius"), 5}});
+    model.addStep(QStringLiteral("gaussian_blur"), QJsonObject{{QStringLiteral("radius"), 5}});
     QCOMPARE(model.rowCount(), 1);
     QCOMPARE(countSpy.count(), 1);
     QCOMPARE(model.stepCount(), 1);
@@ -181,8 +180,8 @@ void TestFilterChainModel::moveUpSwapsAndRejectsEdges() {
     model.replaceFrom(steps({QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")}));
 
     model.moveUp(1);
-    QCOMPARE(keyOrder(model), (QStringList{QStringLiteral("b"), QStringLiteral("a"),
-                                           QStringLiteral("c")}));
+    QCOMPARE(keyOrder(model),
+             (QStringList{QStringLiteral("b"), QStringLiteral("a"), QStringLiteral("c")}));
 
     // 首行上移 / 越界 = 无操作（不发 move 信号）。
     QSignalSpy moved(&model, &QAbstractItemModel::rowsAboutToBeMoved);
@@ -190,8 +189,8 @@ void TestFilterChainModel::moveUpSwapsAndRejectsEdges() {
     model.moveUp(-1);
     model.moveUp(3);
     QCOMPARE(moved.count(), 0);
-    QCOMPARE(keyOrder(model), (QStringList{QStringLiteral("b"), QStringLiteral("a"),
-                                           QStringLiteral("c")}));
+    QCOMPARE(keyOrder(model),
+             (QStringList{QStringLiteral("b"), QStringLiteral("a"), QStringLiteral("c")}));
 }
 
 void TestFilterChainModel::moveDownSwapsAndRejectsEdges() {
@@ -200,8 +199,8 @@ void TestFilterChainModel::moveDownSwapsAndRejectsEdges() {
     model.replaceFrom(steps({QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")}));
 
     model.moveDown(0);
-    QCOMPARE(keyOrder(model), (QStringList{QStringLiteral("b"), QStringLiteral("a"),
-                                           QStringLiteral("c")}));
+    QCOMPARE(keyOrder(model),
+             (QStringList{QStringLiteral("b"), QStringLiteral("a"), QStringLiteral("c")}));
 
     // 末行下移 / 越界 = 无操作。
     QSignalSpy moved(&model, &QAbstractItemModel::rowsAboutToBeMoved);
@@ -209,8 +208,8 @@ void TestFilterChainModel::moveDownSwapsAndRejectsEdges() {
     model.moveDown(-1);
     model.moveDown(3);
     QCOMPARE(moved.count(), 0);
-    QCOMPARE(keyOrder(model), (QStringList{QStringLiteral("b"), QStringLiteral("a"),
-                                           QStringLiteral("c")}));
+    QCOMPARE(keyOrder(model),
+             (QStringList{QStringLiteral("b"), QStringLiteral("a"), QStringLiteral("c")}));
 }
 
 void TestFilterChainModel::moveRefreshesChainIndexRole() {
@@ -220,8 +219,8 @@ void TestFilterChainModel::moveRefreshesChainIndexRole() {
 
     // chainIndex 是行号（AppFilterChainItem 序号显示），移动后按新序读取。
     model.moveUp(2);
-    QCOMPARE(keyOrder(model), (QStringList{QStringLiteral("a"), QStringLiteral("c"),
-                                           QStringLiteral("b")}));
+    QCOMPARE(keyOrder(model),
+             (QStringList{QStringLiteral("a"), QStringLiteral("c"), QStringLiteral("b")}));
     QCOMPARE(model.index(1, 0).data(FilterChainModel::ChainIndexRole).toInt(), 1);
     QCOMPARE(model.index(2, 0).data(FilterChainModel::ChainIndexRole).toInt(), 2);
     QCOMPARE(model.index(2, 0).data(FilterChainModel::ChainFilterKeyRole).toString(),

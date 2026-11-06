@@ -102,12 +102,9 @@ QVariant FilterModel::data(const QModelIndex &index, int role) const {
 
 QHash<int, QByteArray> FilterModel::roleNames() const {
     return {
-        {FilterKeyRole, "filterKey"},
-        {FilterNameRole, "filterName"},
-        {CategoryLabelRole, "categoryLabel"},
-        {ParamsJsonRole, "paramsJson"},
-        {AvailableRole, "available"},
-        {OptionalDepsRole, "optionalDeps"},
+        {FilterKeyRole, "filterKey"},         {FilterNameRole, "filterName"},
+        {CategoryLabelRole, "categoryLabel"}, {ParamsJsonRole, "paramsJson"},
+        {AvailableRole, "available"},         {OptionalDepsRole, "optionalDeps"},
         {DescriptionRole, "description"},
     };
 }
