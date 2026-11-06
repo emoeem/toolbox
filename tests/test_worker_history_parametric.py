@@ -326,6 +326,11 @@ class WorkerParametricHistoryTests(unittest.TestCase):
         # 锚点重放底动作的陈旧参数，静默复原出错误像素。
         self.assertIsNone(self.doc().undo_stack[0].replay)
         self._apply_chain()
+        # §3.3：新变更加入即截断 redo 分支——此前的 flip 复合 redo 条目在本次
+        # 链应用后已不可重做，故本轮 undo/redo 往返的目标态是"本次链应用之后"
+        # 的状态（灰度滤镜 float32 截断非幂等，链再应用像素仍会变化），在
+        # 应用后立即采集；redo 只须与该状态逐位一致（快照条目 1.0 语义）。
+        reapplied_sha = _sha256_array(self.doc().image)
         stack = self.doc().undo_stack
         self.assertEqual([e.name for e in stack], ['filter.apply', 'filter.apply'])
         self.assertIsNotNone(stack[1].pixels)  # 屏障之上退化为快照条目
@@ -333,28 +338,33 @@ class WorkerParametricHistoryTests(unittest.TestCase):
         self._undo()
         self.assertEqual(_sha256_array(self.doc().image), sha_after['chain3'])
         self._redo()
-        self.assertEqual(_sha256_array(self.doc().image), sha_after['flip1'])
+        self.assertEqual(_sha256_array(self.doc().image), reapplied_sha)
 
     # ---- 8. 取消：compute-before-commit，重放中途取消不动文档 ----------------
     def test_cancelled_replay_leaves_document_untouched(self):
         from processors.cancellation import CancelledError
 
         self._apply_chain()
-        after_chain_sha = _sha256_array(self.doc().image)
         self._apply_chain()
         doc = self.doc()
+        # 像素基线在调用 undo 前采集：灰度滤镜 float32 截断管线非幂等
+        # （L×(0.299f+0.587f+0.114f) 经 float32 舍入后 u8 截断，13/256 灰阶
+        # 再应用会 -1），两次链应用位不相等，取消的 undo 应把像素留在
+        # "最近一次链应用之后"的状态——本测试锁的是 compute-before-commit
+        # （取消既不动栈也不动像素），与滤镜自身的幂等性无关。
+        baseline_sha = _sha256_array(doc.image)
 
         store = self.ctx.store
         with self.assertRaises(CancelledError):  # 第一步重放前即取消
             store.undo(doc, cancel_token=_CancelAfterN(1))
         self.assertEqual(len(doc.undo_stack), 2)  # 栈未动
-        self.assertEqual(_sha256_array(doc.image), after_chain_sha)  # 像素未动
+        self.assertEqual(_sha256_array(doc.image), baseline_sha)  # 像素未动
         self.assertEqual(doc.redo_stack, [])
 
         with self.assertRaises(CancelledError):  # 重放第一步的步进边界取消
             store.undo(doc, cancel_token=_CancelAfterN(2))
         self.assertEqual(len(doc.undo_stack), 2)
-        self.assertEqual(_sha256_array(doc.image), after_chain_sha)
+        self.assertEqual(_sha256_array(doc.image), baseline_sha)
         self.assertEqual(doc.redo_stack, [])
 
 
