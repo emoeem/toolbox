@@ -104,7 +104,12 @@ class TaskRuntime:
             return result
 
         self._pool.submit(_run)
-        return {'task_id': task_id, 'status': task.status}
+        # §2.3 受理回执固定为 queued：受理响应在提交时刻生成，任务体随后被
+        # 线程池立即领取（此刻内部快照可能已是 running 甚至 completed）属于
+        # 调度细节，不应回读 task.status——否则在 max_workers=1 且线程空闲时
+        # 回执会随机变成 'running'，违反协议示例的确定性形状。真实生命周期
+        # 由随后的 task.progress / task.completed|failed 事件推送。
+        return {'task_id': task_id, 'status': STATUS_QUEUED}
 
     def cancel(self, task_id: str) -> dict[str, Any] | None:
         task = self._tasks.get(task_id)
