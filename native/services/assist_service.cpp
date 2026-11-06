@@ -76,8 +76,7 @@ QString AssistService::sendTracked(PendingKind kind, const QString &action,
 void AssistService::loadTools() {
     // 未发出（未绑定后端）不进入在途状态——loadingTools 只描述真实在途的
     // assist.list；成功/失败响应都会收掉标志（onResponseReady ToolList 分支）。
-    const QString requestId =
-        sendTracked(PendingKind::ToolList, QStringLiteral("assist.list"), {});
+    const QString requestId = sendTracked(PendingKind::ToolList, QStringLiteral("assist.list"), {});
     if (!requestId.isEmpty())
         setLoadingTools(true);
 }
@@ -96,16 +95,16 @@ QString AssistService::runTool(const QString &toolKey, const QString &paramsJson
     if (!trimmed.isEmpty()) {
         const QJsonDocument parsed = QJsonDocument::fromJson(trimmed.toUtf8());
         if (!parsed.isObject()) {
-            emit assistError(QStringLiteral("INVALID_PARAMS"), QStringLiteral("参数不是 JSON 对象"));
+            emit assistError(QStringLiteral("INVALID_PARAMS"),
+                             QStringLiteral("参数不是 JSON 对象"));
             return {};
         }
         params = parsed.object();
     }
-    const QString requestId =
-        sendTracked(PendingKind::Run, toolKey, params, toolKey);
+    const QString requestId = sendTracked(PendingKind::Run, toolKey, params, toolKey);
     // 任务行登记（"进度模式对齐既有任务"）：TaskModel 只为 trackRequest 登记
     // 过的 request_id 建 row，且 sync 动作的成功响应不产生任务行
-    //（task_model.cpp:66-72 "sync action answered — nothing to track"）——
+    // （task_model.cpp:66-72 "sync action answered — nothing to track"）——
     // 因此无需预知工具是 sync 还是 async，统一登记即可：async 工具受理后
     // 自动画出任务行，sync 工具不留任何痕迹。显示名取目录显示名（未收录时
     // 回落 key；行名归提交方，document_service.cpp:52-75 同一命名层级）。

@@ -40,10 +40,10 @@ class AssistModel : public QAbstractListModel {
 
   public:
     struct Entry {
-        QString key;              // 协议字段 key（= 该工具的运行动作名）
-        QString name;             // 协议字段 name（显示名，"title"）
-        QString categoryLabel;    // 协议字段 category_label（缺省回落 category 原值）
-        bool available = false;   // 协议字段 available（缺可选依赖/模型时 false → 置灰）
+        QString key;           // 协议字段 key（= 该工具的运行动作名）
+        QString name;          // 协议字段 name（显示名，"title"）
+        QString categoryLabel; // 协议字段 category_label（缺省回落 category 原值）
+        bool available = false; // 协议字段 available（缺可选依赖/模型时 false → 置灰）
         QStringList optionalDeps; // 协议字段 optional_deps（置灰原因，如 "tesseract"）
     };
 

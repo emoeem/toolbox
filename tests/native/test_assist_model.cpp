@@ -95,8 +95,8 @@ void TestAssistModel::reloadFromParsesProtocolShape() {
     QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
 
     model.reloadFrom(assistListResult(
-        {toolEntry(QStringLiteral("ocr.run"), QStringLiteral("OCR 文字识别"),
-                   QStringLiteral("ocr"), QStringLiteral("OCR 文字识别"), true, {}),
+        {toolEntry(QStringLiteral("ocr.run"), QStringLiteral("OCR 文字识别"), QStringLiteral("ocr"),
+                   QStringLiteral("OCR 文字识别"), true, {}),
          toolEntry(QStringLiteral("barcode.decode"), QStringLiteral("识别条码/二维码"),
                    QStringLiteral("barcode"), QStringLiteral("条形码"), false,
                    {QStringLiteral("pyzbar")})}));
@@ -113,8 +113,7 @@ void TestAssistModel::reloadFromParsesProtocolShape() {
     // 不可用条目携带依赖列表——置灰 + 原因（§3.8：pyzbar 缺失 → available=
     // false + optional_deps 列出缺失名；总纲 Phase 7："缺少模型或二进制时
     // 不得显示虚假的可用状态"）。
-    const auto decode =
-        found(model, AssistModel::ToolKeyRole, QStringLiteral("barcode.decode"));
+    const auto decode = found(model, AssistModel::ToolKeyRole, QStringLiteral("barcode.decode"));
     QVERIFY(decode.isValid());
     QCOMPARE(decode.data(AssistModel::AvailableRole).toBool(), false);
     QCOMPARE(decode.data(AssistModel::OptionalDepsRole).toStringList(),
@@ -127,9 +126,9 @@ void TestAssistModel::reloadFromFallsBackToCategory() {
 
     // 缺 category_label 时回落 category 原值（同一条目至少有类别可显，
     // filter_model.cpp:23-27 的同一约定）。
-    model.reloadFrom(assistListResult(
-        {toolEntry(QStringLiteral("checksum.file"), QStringLiteral("校验和"),
-                   QStringLiteral("checksum"), QString(), true, {})}));
+    model.reloadFrom(
+        assistListResult({toolEntry(QStringLiteral("checksum.file"), QStringLiteral("校验和"),
+                                    QStringLiteral("checksum"), QString(), true, {})}));
     QCOMPARE(model.rowCount(), 1);
     QCOMPARE(model.index(0, 0).data(AssistModel::CategoryLabelRole).toString(),
              QStringLiteral("checksum"));
@@ -140,8 +139,8 @@ void TestAssistModel::reloadFromClearsAndReplaces() {
     QAbstractItemModelTester tester(&model);
 
     model.reloadFrom(assistListResult(
-        {toolEntry(QStringLiteral("ocr.run"), QStringLiteral("OCR 文字识别"),
-                   QStringLiteral("ocr"), QStringLiteral("OCR 文字识别"), true, {})}));
+        {toolEntry(QStringLiteral("ocr.run"), QStringLiteral("OCR 文字识别"), QStringLiteral("ocr"),
+                   QStringLiteral("OCR 文字识别"), true, {})}));
     QCOMPARE(model.rowCount(), 1);
 
     // 空对象 / 缺 tools 字段 = 清空（FilterModel::reloadFrom 同款语义，
@@ -171,8 +170,8 @@ void TestAssistModel::reloadFromSkipsKeylessEntries() {
     model.reloadFrom(assistListResult(
         {QJsonObject{{QStringLiteral("name"), QStringLiteral("无键条目")},
                      {QStringLiteral("category_label"), QStringLiteral("其他")}},
-         toolEntry(QStringLiteral("ocr.run"), QStringLiteral("有效"),
-                   QStringLiteral("ocr"), QStringLiteral("OCR 文字识别"), true, {})}));
+         toolEntry(QStringLiteral("ocr.run"), QStringLiteral("有效"), QStringLiteral("ocr"),
+                   QStringLiteral("OCR 文字识别"), true, {})}));
     QCOMPARE(model.rowCount(), 1);
     QCOMPARE(model.index(0, 0).data(AssistModel::ToolKeyRole).toString(),
              QStringLiteral("ocr.run"));
@@ -182,13 +181,13 @@ void TestAssistModel::dataOnInvalidIndexes() {
     AssistModel model;
     QAbstractItemModelTester tester(&model);
     model.reloadFrom(assistListResult(
-        {toolEntry(QStringLiteral("ocr.run"), QStringLiteral("OCR 文字识别"),
-                   QStringLiteral("ocr"), QStringLiteral("OCR 文字识别"), true, {})}));
+        {toolEntry(QStringLiteral("ocr.run"), QStringLiteral("OCR 文字识别"), QStringLiteral("ocr"),
+                   QStringLiteral("OCR 文字识别"), true, {})}));
     QCOMPARE(model.rowCount(), 1);
 
     // 扁平表契约（FilterModel::dataOnInvalidIndexes 同款）：负行/越界行/带父
     // 索引的查询一律回答无效索引与无效值，而非崩溃或读出脏数据
-    //（assist_model.cpp data() 的防御分支——UI 传错行号不得越界取值）。
+    // （assist_model.cpp data() 的防御分支——UI 传错行号不得越界取值）。
     QVERIFY(!model.index(-1, 0).isValid());
     QVERIFY(!model.index(model.rowCount(), 0).isValid());
     const QModelIndex row0 = model.index(0, 0);

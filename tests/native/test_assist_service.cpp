@@ -209,8 +209,7 @@ void TestAssistService::loadToolsFillsModel() {
     QCOMPARE(service.loadingTools(), true);
     QCOMPARE(loading.count(), 1); // false → true
 
-    emit m_backend.responseReady(reqId(n + 1),
-                                 successResponse(reqId(n + 1), assistListResult()));
+    emit m_backend.responseReady(reqId(n + 1), successResponse(reqId(n + 1), assistListResult()));
 
     QCOMPARE(service.loadingTools(), false);
     QCOMPARE(loading.count(), 2); // true → false
@@ -349,7 +348,7 @@ void TestAssistService::runToolAsyncAcceptanceAndCompletion() {
     QSignalSpy errors(&service, &AssistService::assistError);
 
     // 任务行：async 工具受理进 TaskModel，进度呈现归 TaskModel
-    //（"进度模式对齐既有任务"）。
+    // （"进度模式对齐既有任务"）。
     TaskModel taskModel;
     QAbstractItemModelTester taskTester(&taskModel);
     taskModel.setBackend(&m_backend);
