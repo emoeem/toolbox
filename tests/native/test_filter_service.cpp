@@ -41,6 +41,7 @@
 #include "models/filter_chain_model.h"
 #include "models/filter_model.h"
 #include "models/task_model.h"
+#include "services/filter_service.h"
 #include "services/settings_service.h"
 
 using toolbox::BackendManager;
@@ -48,6 +49,7 @@ using toolbox::DocumentService;
 using toolbox::FilterChainModel;
 using toolbox::FilterModel;
 using toolbox::FilterService;
+using toolbox::SettingsService;
 using toolbox::TaskModel;
 
 namespace {

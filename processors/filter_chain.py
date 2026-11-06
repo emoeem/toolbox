@@ -226,7 +226,15 @@ class FilterChain:
         chain = cls(name=data.get("name", ""))
         for sd in data.get("steps", []):
             try:
-                chain.add_step(FilterStep.from_dict(sd))
+                step = FilterStep.from_dict(sd)
+                # 与 add_step 的区别：反序列化必须保真往返（docs/ipc-protocol.md
+                # §3.4——load 的 steps 与 save 的输入逐字段一致，可直接回填链编辑
+                # 器），不得把缺省参数物化成显式默认值（CI 实证：存 {} 载出
+                # {'ksize': 11, 'sigma': 2.0}）；缺省值由 apply 时的
+                # validate_params 合并，与序列化无关。未知 key 仍在此拒绝。
+                if FilterDefRegistry.instance().get(step.filter_key) is None:
+                    raise KeyError(f"未知 Filter key: '{step.filter_key}'")
+                chain.steps.append(step)
             except Exception as exc:
                 raise ValueError(f"FilterChain.from_dict: 步骤解析失败: {exc}") from exc
         return chain
