@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import protocol
-from .adapters import batch_adapter, filter_adapter
+from .adapters import batch_adapter, filter_adapter, generate_adapter
 from .adapters.image_adapter import (ADJUST_KEYS, TRANSFORM_REQUIRED_PARAMS, Document, DocumentStore,
                                      WorkerError, adjust_chain, apply_transform)
 from .task_runtime import TaskRuntime
@@ -47,6 +47,7 @@ class Dispatcher:
             'filter.presets.save': self._filter_presets_save,
             'filter.presets.load': self._filter_presets_load,
             'filter.presets.delete': self._filter_presets_delete,
+            'generate.list': self._generate_list,
             'task.cancel': self._task_cancel,
             'task.query': self._task_query,
             'batch.cancel': self._batch_cancel,
@@ -61,6 +62,7 @@ class Dispatcher:
             'image.reset': self._image_reset_job,
             'filter.preview': self._filter_preview_job,
             'filter.apply': self._filter_apply_job,
+            'generate.render': self._generate_render_job,
             'batch.start': self._batch_start_job,
         }
         self._shutting_down = False
@@ -190,6 +192,28 @@ class Dispatcher:
 
     def _filter_presets_delete(self, params: dict) -> dict[str, Any]:
         return filter_adapter.delete_preset(params.get('name'))
+
+    # ---- 生成器（docs/ipc-protocol.md §3.7，Phase 6C）-------------------------
+    # generate.list 为纯目录 sync（模式同 filter.list）；generate.render 的
+    # 未知/不可用生成器、尺寸与参数校验在提交任务前同步完成（先例同
+    # image.transform 的 op 校验），非法即错误响应、不产生 task_id。
+    def _generate_list(self, _params: dict) -> dict[str, Any]:
+        return {'generators': generate_adapter.list_generators()}
+
+    def _generate_render_job(self, params: dict) -> Callable[..., dict]:
+        entry, prepared = generate_adapter.validate_render_request(params)
+        temp_dir = self.ctx.temp_dir
+
+        def job(progress_cb, cancel_token) -> dict:
+            progress_cb(5, '准备渲染')
+            image = generate_adapter.render_generator(entry, prepared, progress_cb, cancel_token)
+            progress_cb(85, '写入结果文件')
+            info = generate_adapter.write_render(image, temp_dir, entry['key'],
+                                                 prepared['width'], prepared['height'])
+            info['generator_key'] = entry['key']
+            return info
+
+        return job
 
     def _task_cancel(self, params: dict) -> dict[str, Any]:
         result = self.ctx.ensure_runtime().cancel(_require(params, 'task_id'))

@@ -40,6 +40,11 @@ qt_add_executable(toolbox
     native/models/batch_model.cpp
     native/services/batch_service.h
     native/services/batch_service.cpp
+    # Phase 6C: 纹理生成器目录模型与 Studio 页服务（总纲 §9.7 Texture Studio）
+    native/models/generator_model.h
+    native/models/generator_model.cpp
+    native/services/studio_service.h
+    native/services/studio_service.cpp
     # Phase 4: 文档服务（编辑器状态 facade）与撤销历史模型
     native/core/document_service.h
     native/core/document_service.cpp
@@ -101,6 +106,8 @@ set(QML_FILES
     ui/components/AppSidebar.qml
     ui/components/AppSliderField.qml
     ui/components/AppStatusBar.qml
+    # Phase 6 第 8-11 项：统一 Studio 工作区组件（StudioPage 宿主的工作流组件）
+    ui/components/AppStudioPage.qml
     ui/components/AppTaskItem.qml
     ui/components/AppTaskQueuePanel.qml
     ui/components/AppTextField.qml
@@ -118,6 +125,8 @@ set(QML_FILES
     ui/pages/ShaderPage.qml
     ui/pages/TexturePage.qml
     ui/pages/SettingsPage.qml
+    # Phase 6 第 8-11 项：创作（Studio）入口宿主页（application.cpp "create"）
+    ui/pages/StudioPage.qml
     ui/pages/PlannedPage.qml
 )
 

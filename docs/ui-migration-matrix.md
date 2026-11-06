@@ -39,6 +39,23 @@
 > 智能缩放、覆盖开关 UI（协议固定覆盖）、"打开输出目录"/"失败重试"
 > 按钮、G'MIC 库本体（§2 行不变）。
 
+> **Phase 6C 进度备注（2026-11-07）**：统一 Studio 工作区垂直切片（生成器
+> 目录 generate.list → 参数定义驱动控件 → generate.render 渲染预览 →
+> 导出编辑器/另存）已在 `phase6b-batch-gmic` 分支工作区实现（协议
+> generate.list/generate.render + C++ StudioService/GeneratorModel + QML
+> StudioPage/AppStudioPage；截至本备注撰写未提交），状态口径
+> `code_complete / static_reviewed`（CHANGELOG Phase 6C 条目）。按头部规则
+> §3 渐变/分形/Texture Studio/Shader Studio 行状态仍为 **`待迁移`**，括注
+> 仅为进度说明而非状态档位；实机验收清单见 docs/phase6c-acceptance.md
+> （选生成器→调参→渲染预览→导出编辑器/另存端到端 / 无依赖生成器置灰路径 /
+> 非模态与恢复 / 大尺寸渲染），通过后统一改判 `已迁移` 并回填验收记录。
+> 该批不含：三个分 Studio 页分流（FractalPage/TexturePage/ShaderPage 仍为
+> 占位页，"创作"入口路由统一 StudioPage）、Shader Studio 本体（GLSL 编辑/
+> GL 预览——协议面 shader:preview 恒置灰优雅降级）、Texture Studio 的预设
+> 管理/缩略图缓存/平铺预览、另存为（C++ savePreviewAs 未实现，UI 如实提示
+> 暂不可用）、photomosaic / fusion（1.0 中为文件→文件工具而非参数驱动的
+> 生成器，协议不注册）。
+
 ## 0. 全局功能（不属于单一工具）
 
 | 现有功能 | 旧入口 | Phase | 状态 |
@@ -82,10 +99,10 @@
 
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
-| 渐变（线性/径向/网格预设） | `2869` | `gradients.linear/radial/mesh` + `MESH_PRESETS` | — | 5（Gradient Studio） | 待迁移 |
-| 分形生成器（13 公式/超采样/着色） | `4342` | `fractal.render_fractal` 全家 | numba 可选 | 5（Fractal Studio） | 待迁移 |
-| Texture Studio（噪声/图案/G'MIC 纹理/SDF raymarch、预设、缩略图缓存） | `app/panels/texture_studio.py:62` | `texture_studio.*`（自建线程池） | gmic 可选 | 5（Texture Studio） | 待迁移 |
-| Shader Studio（GLSL 编辑/高亮/GL 预览/uniform 自动参数/导入导出） | `app/panels/shader_studio.py:97` | `shader_studio.*` | **glslangValidator** 可选 | 5（Shader Studio，真实图形会话验收） | 待迁移 |
+| 渐变（线性/径向/网格预设） | `2869` | `gradients.linear/radial/mesh` + `MESH_PRESETS` | — | 5（Gradient Studio） | 待迁移（Phase 6C 已以 gradient:linear/radial/mesh 生成器条目进入统一 Studio 工作区：目录/参数控件（color 发 hex）/渲染预览/导出编辑器接线；独立 Gradient 分页不分流，待实机验收） |
+| 分形生成器（13 公式/超采样/着色） | `4342` | `fractal.render_fractal` 全家 | numba 可选 | 5（Fractal Studio） | 待迁移（Phase 6C 已以 fractal:<formula>——`_2D_FORMULAS` 全部 15 个 2D 公式——与 fractal:mandelbulb 生成器条目进入统一 Studio 工作区：公式能力裁剪的参数控件、逐行取消检查点、渲染预览/导出接线；分形 Studio 页的缩放导航/预设未分流，待实机验收） |
+| Texture Studio（噪声/图案/G'MIC 纹理/SDF raymarch、预设、缩略图缓存） | `app/panels/texture_studio.py:62` | `texture_studio.*`（自建线程池） | gmic 可选 | 5（Texture Studio） | 待迁移（Phase 6C 已以 texture:noise×5/pattern×5/raymarch:orb/gmic×4 生成器条目进入统一 Studio 工作区：缺省参数取 1.0 内置预设、gmic 缺失时该族置灰 + 原因、同种子可重复；预设管理/缩略图缓存/平铺预览未迁移，待实机验收） |
+| Shader Studio（GLSL 编辑/高亮/GL 预览/uniform 自动参数/导入导出） | `app/panels/shader_studio.py:97` | `shader_studio.*` | **glslangValidator** 可选 | 5（Shader Studio，真实图形会话验收） | 待迁移（Phase 6C 仅交付协议面优雅降级：generate.list 的 shader:preview 恒 `available=false` + optional_deps 含 opengl/glslangValidator，Studio 页置灰；GLSL 编辑/GL 预览/uniform 未迁移，真实图形会话验收不变） |
 | CPU Shader 快捷（invert/posterize/scanlines/vignette） | `3243` | `parity.shader_cpu` | — | 5 | 待迁移 |
 | Photomosaic（≥10 素材） | `3273` | `parity.photomosaic` | — | 5 | 待迁移 |
 | 多帧融合 | `3285` 附近 | `parity.multi_frame_fusion` | — | 5 | 待迁移 |

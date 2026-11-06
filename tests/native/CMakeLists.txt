@@ -216,3 +216,47 @@ target_sources(test_batch_service PRIVATE
 target_include_directories(test_batch_service PRIVATE
     ${CMAKE_SOURCE_DIR}/native
 )
+
+# GeneratorModel：纯数据模型（不连 BackendManager），填充经 Q_INVOKABLE
+#（reloadFrom），测试直接构造即可；同 test_filter_model 模式。
+# QAbstractItemModelTester 需 Qt6::Test，QML_ELEMENT 元类型需 Qt6::Qml。
+qt_add_executable(test_generator_model test_generator_model.cpp)
+target_link_libraries(test_generator_model PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME generator_model COMMAND test_generator_model)
+target_sources(test_generator_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/models/generator_model.cpp
+)
+target_include_directories(test_generator_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)
+
+# StudioService：消费 BackendManager 信号（测试直接发射，同 test_batch_service
+# 模式），exportToEditor 委托 DocumentService::instance()（openDocument 写
+# SettingsService 最近文件、dispatch 登记 TaskModel 行），且 render 经
+# bindTaskModel 登记任务行，故 core/、models/（generator + task）、services/
+#（studio + settings）与 backend/ 源一并编入（test_filter_service 同款组合）。
+# 两处服务源码均用 QML 单例工厂，故需 Qt6::Qml。
+qt_add_executable(test_studio_service test_studio_service.cpp)
+target_link_libraries(test_studio_service PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME studio_service COMMAND test_studio_service)
+target_sources(test_studio_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/services/studio_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/generator_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/core/document_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/task_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/services/settings_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/python_worker.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/ipc_protocol.cpp
+)
+target_include_directories(test_studio_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)

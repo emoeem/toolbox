@@ -67,8 +67,12 @@ void Application::buildCatalog() {
     m_navModel.addEntry({QStringLiteral("editor"), QStringLiteral("编辑"),
                          QStringLiteral("qrc:/Toolbox/ui/pages/EditorPage.qml"), true,
                          QStringLiteral("P0")});
+    // Phase 6 第 8-11 项：创作入口即统一 Studio 工作区（生成器目录由
+    // StudioService 提供，AppStudioPage 承载生成器/参数/预览/导出工作流）；
+    // FractalPage/TexturePage/ShaderPage 占位页仍登记在 qrc，但不再是本入口
+    // 的目标（ui-page-spec §5 的分 Studio 专属页待后续批次再分流）。
     m_navModel.addEntry({QStringLiteral("create"), QStringLiteral("创作"),
-                         QStringLiteral("qrc:/Toolbox/ui/pages/FractalPage.qml"), true,
+                         QStringLiteral("qrc:/Toolbox/ui/pages/StudioPage.qml"), true,
                          QStringLiteral("P1")});
     m_navModel.addEntry({QStringLiteral("batch"), QStringLiteral("批量"),
                          QStringLiteral("qrc:/Toolbox/ui/pages/BatchPage.qml"), true,

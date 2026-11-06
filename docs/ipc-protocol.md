@@ -146,6 +146,8 @@ Worker 启动参数：
 | `batch.start` | async | `{paths, output_dir, format, quality?, naming?, pattern?, steps?}` | `{task_id, status, total}`（受理回执；进度/终态事件增补批处理字段，§3.5） |
 | `batch.cancel` | sync | `{task_id}` | `{cancelled}`（§3.5） |
 | `gmic.check` | sync | `{}` | `{available, version, source}`（§3.6） |
+| `generate.list` | sync | `{}` | `{generators: [{key, name, category, category_label, description, available, optional_deps, params}]}`（§3.7） |
+| `generate.render` | async | `{generator_key, params?, width, height}` | `{task_id, status}`（受理回执）；完成 result `{path, width, height, sha256, generator_key}`（§3.7） |
 
 动作集合按阶段扩展（总纲 §6.2）；禁止各页面私自定义协议动作。
 
@@ -190,6 +192,38 @@ TaskRuntime 取消通道、语义一致），`batch.cancel` 与 `gmic.check` 动
 目前没有 C++ 调用方——G'MIC 置灰路径消费的是 `filter.list` 的
 `available`/`optional_deps`（Phase 6A 交付口径），`gmic.check` 为设置页
 "外部依赖"分组的规划数据源（ui-page-spec.md §4），尚未接线。
+
+Phase 6（总纲 §13 迁移顺序第 8-11 项：Fractal / Texture / Shader Studio 与
+Gradient 等参数驱动生成器的统一目录与渲染，Phase 6C 批次）本轮增补：§3 新增
+`generate.list` / `generate.render`（§3.7）。仍为纯新增
+动作，不改动既有动作，`protocol` 保持 `1`（§8 兼容性规则）。Python 侧实现于
+`python_worker/adapters/generate_adapter.py` 与 `python_worker/dispatcher.py`
+（动作表），复用 1.0 资产——`processors/fractal.py`（公式表 +
+`render_fractal` / `render_mandelbulb`）、`processors/texture_studio/`
+（`presets.py` 预设表 + `generators.generate`）、`processors/gradients.py`
+（linear/radial/mesh + MESH_PRESETS）、`processors/shader_studio/`（依赖标注，
+Worker 侧降级为不可用）、`processors/filter_defs.py` `FilterParam.validate`
+（参数取值域校验）与 `python_worker/adapters/filter_adapter.py`
+`write_preview`（§4 临时 PNG 通道）；测试锁为 `tests/test_worker_generate.py`。
+C++ 侧消费实现于 `native/services/studio_service.cpp`（generate.render 上送
+`generator_key/params/width/height`，完成事件取 `path` 交付预览）与
+`native/models/generator_model.cpp`（generate.list 结果驱动目录行模型），
+与本节字段同步交付。总纲 Phase 6 清单中的 photomosaic / fusion 在 1.0 资产
+（`processors/parity.py:319` / `:474`）中是文件→文件工具而非参数驱动的
+生成器，不注册（不凭空造实现）。
+
+Phase 6C 复查（2026-11-07，与本节实现逐字段核对后的增补）：`params` 中
+`color` 类型条目的取值形状按 `FilterParam._validate_color` 的既有词汇双向
+接受——`[r,g,b]` 整数数组（0-255）**或** `#RGB/#RRGGBB/#RRGGBBAA` hex 文本；
+QML 参数面板（AppFilterParameterGroup）对 color 类型发送 hex 文本，Worker
+渲染侧经 `generate_adapter._hex_to_rgb` 归一为元组后交给 processors（processors
+各实现按数组消费，不接受 hex 字符串）。消费侧现状如实记录：C++ 的
+`notifyPreviewReady` 另接受完成 result 的 `data` 字段作为 `path` 缺失时的
+内联兜底（studio_service.cpp:209-223，test_studio_service.cpp 锁定）——
+`data` **不在本节协议形状内**（§4 禁止 Base64 大图），Worker 实现也从不
+发送，该分支仅为消费方防御路径，按"消费方忽略未知字段"口径如实记录。
+`generate.list` 条目的 `description` 字段当前无 UI 消费（GeneratorModel
+角色面不含该字段），协议面保留。
 
 ### 3.1 文档版本（document version）
 
@@ -399,11 +433,72 @@ DocumentStore、无 `document_id`，不触碰 §3.1 的文档 `version`。
 - 本动作不产生任务、不触碰文档与任务状态；`source` 仅在 `available=true`
   时为 `"cli" | "python"`。
 
+### 3.7 生成器目录与渲染（generate.list / generate.render，Phase 6C 增补）
+
+`generate.list`（sync）`{}` → `{generators: [{key, name, category,
+category_label, description, available, optional_deps, params}]}`：
+
+- 形状与 `filter.list` 同构（目录类 sync 动作的既有词汇）；条目来自
+  processors 既有生成器资产的元信息，Worker 不自造参数表。
+- `category` 取值 `fractal | texture | gradient | shader`；`category_label`
+  为本地化显示名（缺省回落 `category` 原值，filter.list 同款）。
+- `params` 为参数定义数组，元素形状与 filter.list 的参数描述一致
+  （`{name, label, type, default, minimum, maximum, step, choices,
+  description}`），`type` 词汇同为 `int/float/bool/enum/color`；UI 据此
+  自动生成控件，不硬编码任何生成器的参数表。
+- `available=false` 表示可选依赖未满足，消费方须置灰且不得发起渲染；
+  `optional_deps` 为置灰原因（缺失依赖名列表，如 `["gmic"]`）。
+- 覆盖范围（如实枚举，键即 `generate.render` 的 `generator_key`）：
+  - `fractal:<formula>`（`processors/fractal.py` `_2D_FORMULAS` 全部 15 个
+    2D 公式）与 `fractal:mandelbulb`（3D 光线步进）；均可用。
+  - `texture:perlin|simplex|value|worley|cellular`（noise）、
+    `texture:pattern:stripes|rings|checker|dots|grid`（pattern）、
+    `texture:raymarch:orb`（CPU SDF）：均可用；缺省参数取自
+    `processors/texture_studio/presets.py` 内置预设。
+  - `texture:gmic:paper|canvas|grunge|noise_blend`：仅当 G'MIC CLI 可用
+    （`processors/gmic.py available()`，即 `shutil.which("gmic")`）时
+    `available=true`；缺失时 `available=false` + `optional_deps=["gmic"]`
+    （ui-page-spec.md："G'MIC 缺失时该生成器置灰"）。1.0 内部的 numpy
+    降级实现不改变协议面的可用性判定。
+  - `gradient:linear|radial|mesh`：均可用。
+  - `shader:preview`：恒为 `available=false`（优雅降级）——Worker 进程没有
+    OpenGL 运行时（1.0 的着色器渲染发生在 Qt/GL 侧），`optional_deps` 含
+    `opengl`；`processors/shader_studio/validator.py` 的外部校验依赖
+    `glslangValidator` 缺失时一并列入。
+
+`generate.render`（async）`{generator_key, params?, width, height}` → 受理
+`{task_id, status}`，完成事件 result `{path, width, height, sha256,
+generator_key}`：
+
+- `generator_key` 必须来自 `generate.list`；`generator` 作为同值别名兼容
+  接受（两者都不给 → `INVALID_PARAMS`）。
+- `width` / `height`：整数 1..4096（上限与 `FractalParams.validate` 一致），
+  非法 → 同步 `INVALID_PARAMS`。
+- `params`：参数值对象，可省（缺省按条目默认值渲染）。键值逐项经条目
+  `params` 定义校验（`FilterParam.validate`），分形另经
+  `FractalParams.validate`；未知生成器、不可用生成器（`optional_deps` 未
+  满足）或取值非法 → **提交任务前同步 `INVALID_PARAMS`**，不产生 task_id
+  （先例同 `image.transform` 的提交前 op 校验）。`color` 类型条目的取值
+  形状见本节 Phase 6C 复查注（`[r,g,b]` 数组或 hex 文本双向接受，渲染侧
+  归一为数组）。
+- 渲染复用既有实现：`processors/fractal.py` `render_fractal` /
+  `render_mandelbulb`、`processors/texture_studio/generators.py` `generate`、
+  `processors/gradients.py` 三个渐变函数。完成 result 经 §4 临时 PNG 通道
+  交付（复用 `filter_adapter.write_preview` 机制，`max_side` 取请求尺寸 →
+  不降采样，按请求的 width/height 原尺寸落盘）；同一生成器重复渲染按
+  生成器 key 覆盖命名（`preview-generate-<key>.png`，§4 防堆积规则）。
+- 进度与取消照 §2.3/§7（≥100ms 节流）：分形渲染直通 `render_fractal` /
+  `render_mandelbulb` 的协作检查点（逐行）；texture / gradient 渲染为同步
+  CPU 计算，取消在任务体边界检查。取消以 `task.failed`（`CANCELLED`）收尾。
+- 本动作不经 DocumentStore、无 `document_id`，不触碰 §3.1 的文档
+  `version`。
+
 ## 4. 大图数据传递（总纲 §6.3）
 
 - JSON 只传路径、ID、尺寸与校验；**禁止 Base64 大图**。
 - 预览/恢复刷新类动作（`filter.preview`、`image.adjust`、`image.transform`、
-  `image.undo`、`image.redo`、`image.reset`）的结果写入 `--temp-dir` 下
+  `image.undo`、`image.redo`、`image.reset`）与生成器渲染（`generate.render`，
+  §3.7）的结果写入 `--temp-dir` 下
   PNG（无损小文件，便于纹理上传），消息携带 `path/width/height/sha256`。
 - C++ 侧读取临时文件构造 QSG 纹理；读取后即可删除，由 Worker 会话结束统一清理。
 - 临时文件规则：所有者 = Worker 会话；生命周期 = 会话；每会话预览文件按

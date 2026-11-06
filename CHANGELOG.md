@@ -1,5 +1,154 @@
 # Changelog
 
+## 2026-11-07 (Phase 6C — 统一 Studio 工作区：生成器目录与渲染)
+
+依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 6（滤镜系统与创作工作区）
+迁移顺序的第 8-11 项（Fractal Studio / Texture Studio / Shader Studio /
+Gradient 等参数驱动生成器），交付统一 Studio 工作区的协议化垂直切片：
+`generate.list` / `generate.render`（ipc-protocol.md §3.7）两动作、C++
+StudioService/GeneratorModel 消费侧、QML StudioPage + AppStudioPage 导航接线
+（一级导航"创作"→ 选生成器 → 调参 → 渲染预览 → 导出编辑器/另存）。复用 1.0
+资产不重写：`processors/fractal.py`（公式表 + `render_fractal` /
+`render_mandelbulb`）、`processors/texture_studio/`（presets.py 预设缺省表 +
+`generators.generate`，gmic 系沿用其 CLI/numpy 双路径）、`processors/gradients.py`
+（linear/radial/mesh + MESH_PRESETS）、`processors/filter_defs.py`
+`FilterParam.validate`（参数取值域校验）、`processors/cancellation.py`
+CancelToken、`python_worker/adapters/filter_adapter.py` `write_preview`
+（§4 临时 PNG 通道）。如实边界：`shader:preview` 恒为不可用（Worker 无
+OpenGL 运行时，优雅降级）——Shader Studio 本体（GLSL 编辑/GL 预览）不在本批；
+photomosaic / fusion 在 1.0 是文件→文件工具而非参数驱动的生成器，不注册
+（不凭空造实现）；三个分 Studio 页（FractalPage/TexturePage/ShaderPage）
+未分流，"创作"入口路由统一 StudioPage，ui-page-spec §5 的分页面特有布局
+（Julia 联动显隐、平铺预览、GLSL 编辑器）待后续批次；[另存为] 的 C++
+`StudioService.savePreviewAs` 尚未实现——QML typeof 探测后如实提示
+"暂不可用"，绝不静默无操作。
+状态口径（总纲 §14.2）：本批全部为 **code_complete / static_reviewed**；
+Linux 目标环境验收清单见 `docs/phase6c-acceptance.md`（Studio 工作流端到端 /
+无依赖生成器置灰路径 / 非模态与恢复 / 大尺寸渲染，实机项与 CI 项分列），
+未执行任何目标环境运行验证；迁移矩阵 §3 相关行按其状态取值规则保持
+**待迁移**（ui-migration-matrix.md 头部与 Phase 6C 进度备注）。
+
+> **CI 覆盖说明**：逻辑层验证已就位，随既有 CI 机制纳入执行——test job 的
+> `unittest discover` 纳入 `tests/test_worker_generate.py`（37 用例：进程内
+> Dispatcher + TaskRuntime，目录形状与 filter.list 同构、分形公式全覆盖与
+> 公式能力裁剪断言、fractal/texture/gradient 小尺寸渲染往返与像素语义、
+> 同种子可重复、完成 result 字段集与按 key 覆盖命名、颜色参数双形状、
+> texture:gmic 系渲染通道（numpy 降级往返）、取消全路径、提交前同步
+> INVALID_PARAMS 全参数面、gmic 依赖 mock 双路径；其中 7 组覆盖缺口为本批
+> 核对后补齐——hex 颜色双向、result 形状与覆盖命名、gmic 系渲染通道、
+> texture 边界取消 CANCELLED、分形 cancel_token 直通装配、进度 message
+> 包装）；native job 的 CTest 新注册 `generator_model`（8 用例）、
+> `studio_service`（11 槽：9 用例 + initTestCase/cleanupTestCase）两目标。
+> 协议复查（ipc-protocol.md Phase 6C 复查注）如实增补：color 参数取值
+> `[r,g,b]` 数组与 #RGB/#RRGGBB hex 文本双向接受（UI 发 hex、Worker 归一
+> 为数组）、C++ `notifyPreviewReady` 的 `data` 内联兜底为消费方防御分支
+> （协议形状无 `data`、Worker 从不发送）、`description` 字段无 UI 消费。
+> 截至本条目撰写 Phase 6C 改动尚未提交推送，推送后实际运行结果以
+> GitHub Actions 为准；跨进程链路（QProcess + JSON Lines + 临时 PNG →
+> QSG 纹理）、GUI 交互（目录卡片/参数控件/画布缩放/导出跳转/FileDialog）、
+> 真实 gmic CLI 渲染与真实 OpenGL 会话不在 CI 覆盖内，必须实机
+> （docs/phase6c-acceptance.md §2-§5）。
+
+### Added（协议与 Worker）
+
+- `docs/ipc-protocol.md`：§3 新增 `generate.list` / `generate.render` 两动作
+  行 + §3.7（生成器目录形状与覆盖范围如实枚举、渲染参数校验、临时 PNG
+  交付与覆盖命名、进度/取消语义）。纯新增，`protocol` 保持 `1`（§8 兼容性
+  规则）。Phase 6C 复查注（本批逐字段核对后增补）：color 类型取值双向
+  接受（`FilterParam._validate_color` 既有词汇）、`data` 内联兜底为消费方
+  防御分支、`description` 无 UI 消费。
+- `python_worker/adapters/generate_adapter.py`（新文件）：生成器注册表
+  （元信息全部取自 processors 既有资产，Worker 不自造参数表——fractal
+  公式表按公式能力裁剪参数集、texture 缺省取 BUILTIN_PRESETS、gmic 系按
+  CLI 可用性如实置灰、shader:preview 恒不可用 + 依赖原因）、generate.list
+  目录（与 filter.list 同构词汇）、generate.render 提交前校验与参数装配
+  （未知/不可用生成器、尺寸 1..4096、参数逐项 FilterParam.validate、分形
+  另经 FractalParams.validate——非法即 `INVALID_PARAMS`、不产生 task_id）、
+  统一渲染入口（fractal 直通逐行取消检查点；texture/gradient 任务体边界
+  检查）与结果落盘（`preview-generate-<key>.png` 按 key 覆盖，§4 防堆积）。
+- `python_worker/dispatcher.py`：动作表新增两动作（dispatcher.py:50、:65）；
+  `_generate_render_job` 渲染 → 写盘 → result 并入 `generator_key`
+  （dispatcher.py:200-217，提交前判定先例同 image.transform 的 op 校验）。
+
+### Added（C++ 服务与模型）
+
+- `native/models/generator_model.{h,cpp}`：生成器目录行模型（六角色
+  generatorKey/generatorName/categoryLabel/paramsJson/available/
+  optionalDeps；reloadFrom 整表重建——无 key 条目防御性跳过、缺
+  category_label 回落 category 原值、缺 available 按不可用处理"宁可置灰"；
+  search 标题/关键词大小写不敏感匹配）。参数定义原样以 paramsJson 文本
+  交给参数组件自动生成控件，UI 不硬编码任何生成器参数表。
+- `native/services/studio_service.{h,cpp}`：Studio 页 facade（QML 单例，
+  持有 generatorModel）：bindBackend/bindTaskModel 接线、loadGenerators
+  （loadingGenerators 在途生命周期，成败都收标志）、render 本地拒绝
+  （空 key/非正尺寸/paramsJson 非对象 → 恰好一次 studioError、不上送）、
+  tracked dispatch（受理响应经 renderAccepted(taskId) 交付，完成事件取
+  `path` 经 notifyPreviewReady 交付预览，task.failed（含 CANCELLED）经
+  studioError 透传，缺 task_id/缺预览图按协议违约上报）、exportToEditor
+  委托 DocumentService::openDocument（文档状态与错误归文档层，通道分离）。
+  QML 不 sendAction。moc 纪律：GeneratorModel/TaskModel 在头文件完整
+  #include（Q_PROPERTY 指针类型，document_service.h 既有 CI 实证同款）。
+- `CMakeLists.txt`：编入 generator_model / studio_service 源文件与
+  AppStudioPage.qml / StudioPage.qml；`native/app/application.cpp` navModel
+  "create" 路由由 FractalPage 占位页改指 StudioPage.qml。
+
+### Added（QML Studio 页）
+
+- `ui/components/AppStudioPage.qml`（新文件）：统一 Studio 工作区自足组件
+  ——左生成器目录（复用 AppFilterCard：置灰 + 依赖 Tooltip，置灰项不可
+  选中；首个可用项自动认领）、中预览画布（编辑器同款 ImageCanvas + 尺寸
+  512/1024/2048 分段切换 + 缩放控件 + 真实宽高度量 + 渲染中占位）、右
+  参数检查器（复用 AppFilterParameterGroup：paramsJson 驱动五类控件映射，
+  color 发送 hex 文本；[重置参数]）；300ms 防抖 + 单飞在途门（在途新请求
+  入队、解除后补发最新参数）；任务行探针/后端崩溃信号/120s 看门狗三路
+  解门兜底；[导出到编辑器] 委托 exportToEditor 后跳转编辑页；[另存为]
+  FileDialog + savePreviewAs typeof 探测（未实现时如实提示，见已知限制）；
+  Worker 未就绪 BackendDown 态与就绪兜底拉目录；参数面板"整表发送、
+  Worker 兜底合并"纪律原样适用。
+- `ui/pages/StudioPage.qml`（新文件）：一级导航"创作"宿主页面（AppStudioPage
+  自足，页面无状态）。
+
+### Added（测试）
+
+- `tests/test_worker_generate.py`（新文件，37 用例，进程内 Dispatcher +
+  TaskRuntime(max_workers=1)，渲染 ≤48 边保证 CI 时长，gmic 依赖 mock 不
+  依赖真实环境）：见顶部 CI 覆盖说明；本批覆盖核对后补齐 7 组用例
+  （hex 颜色双向与 3 位展开、完成 result 字段集与按 key 覆盖命名、
+  texture:gmic:paper numpy 降级渲染通道、texture 族任务体边界取消
+  CANCELLED 全路径（零落盘 + 迟到取消如实 `cancelling:false`）、分形
+  cancel_token 直通 render_fractal 装配、进度回调 message 包装）。
+- `tests/native/test_generator_model.cpp`（新文件，8 用例，
+  QAbstractItemModelTester）与 `tests/native/test_studio_service.cpp`
+  （新文件，11 槽：9 用例 + initTestCase/cleanupTestCase，信号模拟不启动
+  Worker）：见顶部 CI 覆盖说明；C++ 测试以合成协议帧锁定 §2.3/§7 生命周期
+  契约（真实跨进程归实机验收）。
+
+### 已知限制（如实记录）
+
+- [另存为] 不可用：`StudioService.savePreviewAs` 未实现（AppStudioPage
+  typeof 探测 → "另存为暂不可用"警示 Toast）；产物可经"导出编辑器 →
+  编辑器另存为"间接落盘。C++ 补齐后 QML 调用形状不变。
+- 三个分 Studio 页未分流：FractalPage/TexturePage/ShaderPage 仍是 Phase 2
+  占位页，"创作"入口路由统一 StudioPage；ui-page-spec §5 分页面特有布局
+  （Julia 联动显隐、平铺预览、GLSL 编辑器/编译诊断）不在本批。
+- `shader:preview` 恒不可用（Worker 无 OpenGL 运行时）：Shader Studio 本体
+  未迁移，矩阵 §3 该行状态不变；置灰 + 依赖原因（opengl/glslangValidator）
+  是本批唯一的着色器交付面。
+- photomosaic / fusion 不注册（1.0 中为文件→文件工具，非参数驱动生成器）；
+  SVG / 拼接 / 蒙版等矩阵 §3 其余行不在本批。
+- `generate.list` 条目的 `description` 无 UI 消费（GeneratorModel 角色面
+  不含该字段），协议面保留待后续接 AppFilterCard.description。
+- gmic 系渲染像素双路径：CI/未装 gmic 环境走 numpy 降级实现，装 gmic 环境
+  走 CLI——像素不同是 1.0 既有行为，协议语义相同；真实 gmic 输出观感归
+  实机验收（phase6c-acceptance.md §3/§6）。
+- 渲染并发语义：服务端允许多渲染并发（各自 task_id 关联），QML 单飞串行化
+  （notifyPreviewReady 不携带 task 关联）；看门狗放行后的迟到预览可能覆盖
+  新图（宁可重复渲染，不无信号焊死）——如实记录的取舍。
+- native 侧四处头/测试注释（studio_service.h:30-41、generator_model.h:17-19、
+  test_studio_service.cpp:14-21、test_generator_model.cpp:5-7）写"generate.*
+  尚未写入协议/Worker"，为 native 先行交付时点快照，现状已过期；注释修订
+  不属本批文件清单。
+
 ## 2026-11-07 (Phase 6B — Batch Processing)
 
 依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 6（滤镜系统与创作工作区）
