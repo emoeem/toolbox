@@ -16,6 +16,9 @@ ERR_UNKNOWN_TASK = 'UNKNOWN_TASK'
 ERR_FILE_NOT_FOUND = 'FILE_NOT_FOUND'
 ERR_UNSUPPORTED_FORMAT = 'UNSUPPORTED_FORMAT'
 ERR_UNREDOABLE = 'UNREDOABLE'  # docs/ipc-protocol.md §5：undo/redo 栈空（提交前同步返回）
+# docs/ipc-protocol.md §5/§3.8（Phase 7）：可选依赖（模块/外部二进制/模型文件）
+# 缺失——assist 动作在提交前同步返回，details.missing 列出缺失依赖名。
+ERR_DEPENDENCY_MISSING = 'DEPENDENCY_MISSING'
 ERR_CANCELLED = 'CANCELLED'
 ERR_ENGINE_ERROR = 'ENGINE_ERROR'
 ERR_INTERNAL = 'INTERNAL'

@@ -148,6 +148,39 @@ Worker 启动参数：
 | `gmic.check` | sync | `{}` | `{available, version, source}`（§3.6） |
 | `generate.list` | sync | `{}` | `{generators: [{key, name, category, category_label, description, available, optional_deps, params}]}`（§3.7） |
 | `generate.render` | async | `{generator_key, params?, width, height}` | `{task_id, status}`（受理回执）；完成 result `{path, width, height, sha256, generator_key}`（§3.7） |
+| `assist.list` | sync | `{}` | `{tools: [{key, name, category, category_label, description, type, available, optional_deps}]}`（§3.8） |
+| `ocr.run` | async | `{path, lang?, psm?}` | `{text}`（§3.8） |
+| `pdf.merge` | async | `{paths, output}` | `{path}`（§3.8） |
+| `pdf.split` | async | `{path, output_dir?}` | `{files, output_dir}`（§3.8） |
+| `pdf.rotate` | async | `{path, output, degrees?}` | `{path}`（§3.8） |
+| `pdf.remove_pages` | async | `{path, output, pages}` | `{path}`（§3.8） |
+| `pdf.extract_text` | async | `{path}` | `{text}`（§3.8） |
+| `pdf.set_metadata` | async | `{path, output, metadata}` | `{path}`（§3.8） |
+| `pdf.protect` | async | `{path, output, password}` | `{path}`（§3.8） |
+| `pdf.to_images` | async | `{path, dpi?, output_dir?}` | `{files, pages, output_dir, dpi}`（§3.8） |
+| `barcode.qr.generate` | async | `{data, size?, error_correction?}` | `{path, width, height, sha256}`（§3.8） |
+| `barcode.ean13.generate` | async | `{data, height?}` | `{path, width, height, sha256}`（§3.8） |
+| `barcode.decode` | sync | `{path}` | `{results: [{data, type, rect}]}`（§3.8） |
+| `ascii.render` | sync | `{path, cols?, invert?}` | `{text, rows, cols}`（§3.8） |
+| `compare.images` | async | `{path_a, path_b}` | `{mae, rmse, mse, psnr, ncc, ssim}`（非有限值 → `null`，§3.8） |
+| `checksum.file` | sync | `{path}` | `{md5, sha1, sha256, sha512, crc32, blake2b, blake2s, size}`（§3.8） |
+| `histogram.compute` | sync | `{path, mode?}` | `{mode, histogram}`（§3.8） |
+| `lut.apply` | async | `{path, cube_path}` | `{path, width, height, sha256}`（§3.8） |
+| `media.extract_frames` | async | `{path, fmt?, output_dir?}` | `{files, output_dir}`（§3.8） |
+| `media.convert_animation` | async | `{paths, output, fmt?, fps?}` | `{path}`（§3.8） |
+| `exif.extract` | sync | `{path}` | `{exif: {…}}`（§3.8） |
+| `exif.strip` | async | `{path, output}` | `{path}`（§3.8） |
+| `watermark.text` | async | `{path, output, text, opacity?, position?}` | `{path}`（§3.8） |
+| `archive.create` | async | `{paths, output}` | `{path}`（§3.8） |
+| `crypto.encrypt` | async | `{path, output, password}` | `{path}`（§3.8） |
+| `crypto.decrypt` | async | `{path, output, password}` | `{path}`（§3.8） |
+| `base64.encode` | async | `{path, output}` | `{path}`（§3.8） |
+| `base64.decode` | async | `{path, output}` | `{path}`（§3.8） |
+| `ai.background.remove` | async | `{path, model?, background?}` | `{path, width, height, sha256}`（§3.8） |
+| `ai.upscale` | async | `{path, scale?, model_path?}` | `{path, width, height, sha256}`（§3.8） |
+| `ai.denoise` | async | `{path, strength?}` | `{path, width, height, sha256}`（§3.8） |
+| `ai.colorize` | async | `{path, mode?, style?}` | `{path, width, height, sha256}`（§3.8） |
+| `ai.models.list` | sync | `{task?}` | `{models, backends, cache_root, model_paths}`（§3.8） |
 
 动作集合按阶段扩展（总纲 §6.2）；禁止各页面私自定义协议动作。
 
@@ -537,6 +570,169 @@ generator_key}`：
 - 本动作不经 DocumentStore、无 `document_id`，不触碰 §3.1 的文档
   `version`。
 
+Phase 7（总纲 §13 迁移顺序"AI 与辅助工具"批次）本轮增补：§3 新增
+`assist.list` 与 assist 动作族（§3.8，共 32 个工具动作）与 §5 新增错误码
+`DEPENDENCY_MISSING`。仍为纯新增：不删除字段、不改既有动作与错误码语义，
+`protocol` 保持 `1`（§8 兼容性规则）。Python 侧实现于
+`python_worker/adapters/assist_adapter.py` 与 `python_worker/dispatcher.py`
+（动作表），复用 1.0 资产——`processors/parity.py`（`ocr_image` /
+`extract_exif` / `strip_exif` / `watermark` / `archive_images` /
+`encrypt_file` / `decrypt_file` / `base64_encode` / `base64_decode`）、
+`processors/pdf_tools.py` 全部函数、`processors/barcode.py`、
+`processors/ascii.py`、`processors/lut.py`、`processors/media.py`、
+`processors/compare.py`、`processors/histogram.py`、`processors/checksum.py`、
+`processors/ai.py`、`processors/ai_models.py` 与
+`python_worker/adapters/filter_adapter.py` `write_preview`（§4 临时 PNG
+通道）；测试锁为 `tests/test_worker_assist.py`（2026-11-07 覆盖核对后补齐
+四组：EAN-13 成功接线、convert_animation 成功接线与 fmt 缺省取 output
+扩展名、pdf.merge paths 非空数组、histogram luma 形状）。C++/QML 消费侧
+与本批同步交付：`native/models/assist_model.*`（assist.list 目录行模型，
+五角色 `toolKey/toolName/categoryLabel/available/optionalDeps`——协议面
+保留的 `description`/`type` 不进角色面，消费方忽略未知字段口径同 §3.7
+GeneratorModel 对 `description` 的处置；缺 `available` 按不可用处理，宁可
+置灰不谎称可用）与 `native/services/assist_service.*`（assist.list 拉取 +
+`runTool(toolKey, paramsJson)` 按"条目 key 即动作名"原样上送，sync/async
+由响应形状判定——result 带 `task_id` 即 async 受理 `toolAccepted`，不带即
+sync 直答 `notifyToolResult`；`DEPENDENCY_MISSING` 等提交前拒绝与
+`task.failed`（含 CANCELLED）统一走 `assistError` 错误通道，§5/§7）；QML
+`ui/components/AppToolsPage.qml` + `ui/pages/ToolsPage.qml`（一级导航
+"文件工具"入口，application.cpp navModel `files` 路由，替代 Phase 4
+PlannedPage 占位）。测试锁 `tests/native/test_assist_model.cpp`（6 用例）
+与 `tests/native/test_assist_service.cpp`（8 用例）。实机验收清单见
+docs/phase7-acceptance.md（实机项与 CI 项分列）；迁移矩阵对应行按其头部
+规则保持 `待迁移`。
+
+### 3.8 辅助工具目录与动作（assist.list 与 assist 动作族，Phase 7 增补）
+
+`assist.list`（sync）`{}` → `{tools: [{key, name, category, category_label,
+description, type, available, optional_deps}]}`：
+
+- 与 `filter.list` / `generate.list` 同构的目录词汇（条目 `optional_deps`
+  沿用既有 snake_case 字段名）；**条目 `key` 即动作名**（generate.list
+  "键即 generator_key"同款），消费方按 key 直接发起对应动作。
+- `type` 取值 `sync | async`，与 §3 动作表一致，供消费方决定调用方式。
+- `available=false` 表示可选依赖未满足，消费方须置灰且不得发起对应动作；
+  `optional_deps` 为缺失依赖名列表（模块名 / 外部二进制名 / `model:<id>`
+  模型文件），与提交时 `DEPENDENCY_MISSING` 的 `details.missing` 同源。
+  可用性探测不做缓存：安装依赖后下一次 `assist.list` 即反映。
+- 类别 `category`：`ocr | pdf | barcode | ascii | compare | checksum |
+  base64 | histogram | lut | media | exif | watermark | archive | crypto |
+  ai`；`category_label` 为本地化显示名（缺省回落 `category` 原值）。
+
+assist 动作族（形状见 §3 表；语义通则）：
+
+- **依赖判定**：每个动作在**提交任务前**用与 `assist.list` 相同的探测函数
+  判定依赖；缺失 → 同步错误响应 `DEPENDENCY_MISSING`（`details.missing`
+  列出缺失名），不产生 task_id。OCR 需要 `pytesseract` 模块 + `tesseract`
+  二进制；`pdf.to_images` 需要 `pdf2image` 模块 + `poppler`（`pdftoppm`）
+  二进制；条形码生成/解码分别需要 `qrcode` / `pystrich` / `pyzbar`（探测
+  `pyzbar.pyzbar`——zbar 原生库缺失时父包导入失败，与运行期同口径）；媒体
+  工具需要 `magick`（gif/webp/apng）或 `ffmpeg`（jxl）二进制；文件加密/
+  解密需要 `cryptography` 模块；AI 抠图需要 `rembg` + `onnxruntime` +
+  模型文件。纯核心依赖（numpy/OpenCV/Pillow/pypdf）不探测、不列为
+  `optional_deps`（`cryptography` 虽为 requirements 既有项，仍按可选依赖
+  探测——口径见本节末复查注 ②）。
+- **参数校验优先于依赖判定**：形状非法（缺参数、取值越界、路径不存在等）
+  一律先报 `INVALID_PARAMS` / `FILE_NOT_FOUND`，不因依赖缺失掩盖参数错误。
+- **sync / async 划分**：目录、查询与秒内轻量计算为 sync（`checksum.file`
+  `histogram.compute` `ascii.render` `exif.extract` `barcode.decode`
+  `ai.models.list`）；文件写出与重计算为 async（其余 26 个，模式同
+  `image.save` / `generate.render`），适用 §2.3/§7 全部任务生命周期与取消
+  语义（协作取消在资产调用边界检查；任务体内异常由运行时归一为
+  `task.failed`/`ENGINE_ERROR`）。
+- **结果通道**：像素类结果（`barcode.*.generate` / `lut.apply` / `ai.*` 的
+  `background.remove`/`upscale`/`denoise`/`colorize`）经 §4 临时 PNG 通道
+  交付，完成 result `{path, width, height, sha256}`，按工具 key 覆盖命名
+  （`preview-<工具 key>.png`，§4 防堆积规则）；文件类结果返回明确 `path` /
+  `files`。缺省输出目录落在 Worker 会话临时目录（§4 会话生命周期）；调用
+  方可用 `output_dir` 参数指定保留目录，或对单文件动作用 `output` 指定
+  （**父目录必须已存在**，否则提交前 `INVALID_PARAMS`）。
+- 文本结果（`ocr.run` 的 `text`、`pdf.extract_text` 的 `text`、
+  `ascii.render` 的 `text`）直接走 JSON（文本非像素，不受 §4 大图限制）；
+  `compare.images` 的指标为有限浮点，图像全同时 PSNR 为无穷大、常数图上
+  NCC 无定义——协议面以 `null` 表示（不输出 `Infinity`/`NaN` 非法 JSON）。
+- 本族动作均不经 DocumentStore、无 `document_id`，不触碰 §3.1 的文档
+  `version`；不产生 Base64 大图（§4）。
+
+逐动作要点：
+
+- `ocr.run`（async）`{path, lang?, psm?}` → `{text}`：`lang` 缺省 `eng`、
+  `psm` 缺省 3（取值 0..13），透传 `processors/parity.py ocr_image`。
+- `pdf.*`（async）：逐函数接线 `processors/pdf_tools.py`——`merge`（
+  `paths` 非空数组）、`split`（逐页单文件，命名 `{stem}_{NNN}.pdf`）、
+  `rotate`（`degrees` 须为 90 的非零倍数）、`remove_pages`（`pages` 为 1
+  起始页码数组）、`extract_text`（文本层提取，无文本层 → 空串）、
+  `set_metadata`（`metadata` 键值对象，值按字符串写入）、`protect`（口令
+  加密）；`to_images`（`dpi` 72..1200 缺省 150，逐页 PNG 命名
+  `{stem}_{NNN}.png`，result `{files, pages, output_dir, dpi}`）接
+  `pdf2image.convert_from_path`（1.0 `app/main_window.py:1519` 明示的
+  导出路径；processors/pdf_tools.py 无对应函数，为 requirements 既有依赖
+  的接线）。
+- `barcode.qr.generate`（async）`{data, size? 16..4096, error_correction?
+  L/M/Q/H 缺省 M}`；`barcode.ean13.generate`（async）`{data: 12 或 13 位
+  数字, height?}`——**pystrich 缺失时拒绝**：1.0 资产的 PIL 兜底生成的是
+  非功能性伪条码，按"不得显示虚假的可用状态"原则不暴露；`generate_data_matrix`
+  的 1.0 实现实为 QR 伪实现，**不注册** datamatrix 动作（不凭空造实现）。
+- `barcode.decode`（sync）`{path}` → `{results: [{data, type, rect}]}`，
+  `rect` 为 `{x, y, width, height}`（资产返回的 pyzbar Rect 元组经形状
+  裁剪；资产未给出定位时键恒存在、值为 `null`——本节末复查注 ①）。
+- `checksum.file`（sync）`{path}`：`processors/checksum.py file_hashes`
+  全量七算法 + `size`（字节）；文件不可读 → `FILE_NOT_FOUND`。
+- `histogram.compute`（sync）`{path, mode?}`：`rgb` → `{R,G,B}`（各 256
+  bin）、`luma` → 256 bin 数组、`hsv` → `{H(180),S,V}`。
+- `lut.apply`（async）`{path, cube_path}`：`.cube` 解析失败 → 提交前
+  `INVALID_PARAMS`（解析前移，先例同 crop 越界提交前判定）。
+- `media.extract_frames`（async）`{path, fmt? png/jpg 等 2-5 位字母数字,
+  output_dir?}`；`media.convert_animation`（async）`{paths, output, fmt?,
+  fps? 0.1..120 缺省 12}`，`fmt` 缺省取 `output` 扩展名，取值
+  `gif/webp/apng`（magick）或 `jxl`（ffmpeg）。
+- `exif.extract`（sync）`{path}` → `{exif: {…}}`：值经 JSON 安全归一
+  （bytes → 文本、PIL IFDRational 等标量 → 字符串）；`exif.strip`（async）
+  `{path, output}`；`watermark.text`（async）`{path, output, text,
+  opacity? 0..255, position? top-left/top-right/bottom-left/bottom-right/
+  center}`。
+- `archive.create`（async）`{paths, output}`（ZIP）；`crypto.encrypt` /
+  `crypto.decrypt`（async）`{path, output, password}`（Fernet，口令派生，
+  资产既有实现）；`base64.encode` / `base64.decode`（async）`{path,
+  output}`（文件 ↔ Base64 文本文件，不内联进 JSON）。
+- **AI 动作与降级路径**（总纲 Phase 7"模型和外部依赖状态必须真实"）：
+  - `ai.models.list`（sync）`{task?}` → `{models, backends, cache_root,
+    model_paths}`：`models` 来自 `processors/ai_models.py registry()`，
+    每条含 `installed`/`size`/`version`/`backend`——**安装状态为真实文件
+    探测**（rembg 系查 `~/.rembg/models`、upscayl 系查系统模型目录），无
+    模型文件即 `installed=false`，不谎报可用；`task` 过滤接受注册表词汇
+    `抠图`/`超分` 及英文别名 `background-removal`/`upscale`；`backends`
+    为 `detect_backends()`（CPU 恒有，CUDA/Vulkan 如实探测）。本动作只读：
+    模型安装/卸载（网络下载）不在本批动作面。
+  - 模型路径配置读取：`backend_settings_path()` 同一 settings.json 的
+    `model_paths` 键（`{model_id: 路径}`）优先，其次 `TOOLBOX_AI_MODEL_DIR`
+    环境变量指向目录下的文件（文件名去扩展名为键）；显式配置覆盖环境目录。
+    `model_paths` 随 `ai.models.list` 返回，`ai.upscale` 的 `model_path`
+    参数缺省时按 `edsr`/`upscale`/`super-resolution` 键解析。
+  - `ai.background.remove`（async）`{path, model? u2net/u2netp/
+    isnet-general-use/silueta, background? [r,g,b] 合成底色}`：rembg /
+    onnxruntime / 模型文件任一缺失 → 置灰 + `DEPENDENCY_MISSING`；
+  - `ai.upscale`（async）`{path, scale? 2..8, model_path?}`：配置/显式
+    EDSR 模型路径命中 → `upscale_sr`（OpenCV DNN，无外部二进制）；否则
+    要求 upscayl 二进制 + Real-ESRGAN 系统模型（`upscale_realesrgan`），
+    缺失 → 置灰 + `DEPENDENCY_MISSING`；
+  - `ai.denoise`（async，`strength? 0..100`）与 `ai.colorize`（async，
+    `mode? simple/transfer`，transfer 时 `style? vintage/warm/cool/sunset/
+    forest`）为 OpenCV 核心启发式实现，无外部依赖，恒可用（1.0 的神经
+    降噪/上色路径本就不存在，不虚构）；
+  - 重模型能力在无模型文件的机器上**默认 available=false**（目录置灰 +
+    提交拒绝双保险），满足总纲 Phase 7 的降级路径要求。
+
+Phase 7 复查（2026-11-07，与本节实现逐字段核对后的两处措辞修订，协议
+形状均无变化）：① `barcode.decode` 条目的 `rect` 键**恒存在**（资产未给
+出定位时值为 `null`），上文 `rect?` 措辞按实现修订——消费方按可空处理；
+② 依赖探测以真实可用性为准、不以"是否在 requirements"为准：`cryptography`
+虽为 requirements 既有项，`crypto.encrypt` / `crypto.decrypt` 仍按可选
+依赖探测（模块缺失 → 条目置灰 + 提交 `DEPENDENCY_MISSING`，测试锁
+`test_crypto_dependency_missing`），上文"核心依赖不列为 optional_deps"
+清单中据此移除 `cryptography`（pypdf 确不参与探测——pdf.* 条目
+`deps` 恒空）。
+
 ## 4. 大图数据传递（总纲 §6.3）
 
 - JSON 只传路径、ID、尺寸与校验；**禁止 Base64 大图**。
@@ -562,6 +758,7 @@ generator_key}`：
 | `FILE_NOT_FOUND` | 打开的文件不存在 |
 | `UNSUPPORTED_FORMAT` | 图像格式无法解码 |
 | `UNREDOABLE` | 历史/重做栈无可恢复条目（`image.undo` / `image.redo`，提交前同步返回，见 §3.3） |
+| `DEPENDENCY_MISSING` | 可选依赖（模块/外部二进制/模型文件）缺失（assist 动作，提交前同步返回，`details.missing` 列出缺失名，见 §3.8） |
 | `CANCELLED` | 任务被取消（task.failed 事件携带） |
 | `ENGINE_ERROR` | 处理器执行异常（details 里带 step/filter 信息） |
 | `INTERNAL` | 未分类的内部错误 |

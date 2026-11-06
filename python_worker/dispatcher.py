@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import protocol
-from .adapters import batch_adapter, filter_adapter, generate_adapter
+from .adapters import assist_adapter, batch_adapter, filter_adapter, generate_adapter
 from .adapters.image_adapter import (ADJUST_KEYS, TRANSFORM_REQUIRED_PARAMS, Document, DocumentStore,
                                      WorkerError, adjust_chain, apply_transform)
 from .task_runtime import TaskRuntime
@@ -49,6 +49,13 @@ class Dispatcher:
             'filter.presets.load': self._filter_presets_load,
             'filter.presets.delete': self._filter_presets_delete,
             'generate.list': self._generate_list,
+            'assist.list': self._assist_list,
+            'checksum.file': self._checksum_file,
+            'histogram.compute': self._histogram_compute,
+            'ascii.render': self._ascii_render,
+            'exif.extract': self._exif_extract,
+            'barcode.decode': self._barcode_decode,
+            'ai.models.list': self._ai_models_list,
             'task.cancel': self._task_cancel,
             'task.query': self._task_query,
             'batch.cancel': self._batch_cancel,
@@ -65,6 +72,35 @@ class Dispatcher:
             'filter.apply': self._filter_apply_job,
             'generate.render': self._generate_render_job,
             'batch.start': self._batch_start_job,
+            # 辅助工具（Phase 7，docs/ipc-protocol.md §3.8）：文件写出与重计算
+            # 动作统一 async（模式同 image.save / generate.render），任务体经
+            # assist_adapter 接线 processors 1.0 资产；依赖与参数在提交前判定。
+            'ocr.run': self._ocr_run_job,
+            'pdf.merge': self._pdf_merge_job,
+            'pdf.split': self._pdf_split_job,
+            'pdf.rotate': self._pdf_rotate_job,
+            'pdf.remove_pages': self._pdf_remove_pages_job,
+            'pdf.extract_text': self._pdf_extract_text_job,
+            'pdf.set_metadata': self._pdf_set_metadata_job,
+            'pdf.protect': self._pdf_protect_job,
+            'pdf.to_images': self._pdf_to_images_job,
+            'barcode.qr.generate': self._barcode_qr_generate_job,
+            'barcode.ean13.generate': self._barcode_ean13_generate_job,
+            'compare.images': self._compare_images_job,
+            'lut.apply': self._lut_apply_job,
+            'media.extract_frames': self._media_extract_frames_job,
+            'media.convert_animation': self._media_convert_animation_job,
+            'exif.strip': self._exif_strip_job,
+            'watermark.text': self._watermark_text_job,
+            'archive.create': self._archive_create_job,
+            'crypto.encrypt': self._crypto_encrypt_job,
+            'crypto.decrypt': self._crypto_decrypt_job,
+            'base64.encode': self._base64_encode_job,
+            'base64.decode': self._base64_decode_job,
+            'ai.background.remove': self._ai_background_remove_job,
+            'ai.upscale': self._ai_upscale_job,
+            'ai.denoise': self._ai_denoise_job,
+            'ai.colorize': self._ai_colorize_job,
         }
         self._shutting_down = False
 
@@ -241,6 +277,112 @@ class Dispatcher:
         # 可用性如实返回（§3.6）；探测在适配层接线到 processors.gmic.check，
         # dispatcher 保持引擎无关（adapters/__init__.py 的分层规则）。
         return filter_adapter.check_gmic()
+
+    # ---- 辅助工具（docs/ipc-protocol.md §3.8，Phase 7）-----------------------
+    # 全部为纯接线：目录与参数/依赖校验在 assist_adapter（条目 available 与
+    # 提交时 DEPENDENCY_MISSING 用同一探测函数），本层不触碰 processors。
+
+    def _assist_list(self, _params: dict) -> dict[str, Any]:
+        return {'tools': assist_adapter.list_tools()}
+
+    def _checksum_file(self, params: dict) -> dict[str, Any]:
+        return assist_adapter.checksum_file(params)
+
+    def _histogram_compute(self, params: dict) -> dict[str, Any]:
+        return assist_adapter.histogram_compute(params)
+
+    def _ascii_render(self, params: dict) -> dict[str, Any]:
+        return assist_adapter.ascii_render(params)
+
+    def _exif_extract(self, params: dict) -> dict[str, Any]:
+        return assist_adapter.exif_extract(params)
+
+    def _barcode_decode(self, params: dict) -> dict[str, Any]:
+        return assist_adapter.barcode_decode(params)
+
+    def _ai_models_list(self, params: dict) -> dict[str, Any]:
+        return assist_adapter.ai_models_list(params)
+
+    # 异步辅助动作任务工厂：统一注入会话临时目录（缺省输出目录与 §4 临时
+    # PNG 通道落点），先例同 _generate_render_job 对 ctx.temp_dir 的取用。
+    def _ocr_run_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.ocr_run_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_merge_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_merge_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_split_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_split_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_rotate_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_rotate_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_remove_pages_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_remove_pages_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_extract_text_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_extract_text_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_set_metadata_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_set_metadata_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_protect_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_protect_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _pdf_to_images_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.pdf_to_images_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _barcode_qr_generate_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.barcode_qr_generate_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _barcode_ean13_generate_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.barcode_ean13_generate_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _compare_images_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.compare_images_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _lut_apply_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.lut_apply_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _media_extract_frames_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.media_extract_frames_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _media_convert_animation_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.media_convert_animation_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _exif_strip_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.exif_strip_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _watermark_text_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.watermark_text_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _archive_create_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.archive_create_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _crypto_encrypt_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.crypto_encrypt_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _crypto_decrypt_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.crypto_decrypt_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _base64_encode_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.base64_encode_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _base64_decode_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.base64_decode_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _ai_background_remove_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.ai_background_remove_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _ai_upscale_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.ai_upscale_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _ai_denoise_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.ai_denoise_job(params, temp_dir=self.ctx.temp_dir)
+
+    def _ai_colorize_job(self, params: dict) -> Callable[..., dict]:
+        return assist_adapter.ai_colorize_job(params, temp_dir=self.ctx.temp_dir)
+
 
     # ---- 异步任务工厂（返回 fn(progress_cb, cancel_token)）-------------------
     def _image_save_job(self, params: dict) -> Callable[..., dict]:

@@ -1,5 +1,110 @@
 # Changelog
 
+## 2026-11-07 (Phase 7 — AI 与辅助工具：统一工具页与 assist 动作族)
+
+依据总纲 `docs/toolbox-2.0-project-plan.md` §13 Phase 7（AI 与辅助工具），
+交付辅助能力的协议化垂直切片：`assist.list` 工具目录 + assist 动作族共
+**32 个工具动作**（OCR / PDF×8 / 条形码×3 / ASCII / 图像对比 / 校验和 /
+直方图 / LUT / 媒体×2 / EXIF×2 / 水印 / 归档 / 加密×2 / Base64×2 / AI×5，
+ipc-protocol.md §3.8 + §3 动作表 assist 段）与 §5 新增错误码
+**`DEPENDENCY_MISSING`**（可选依赖缺失，提交前同步返回，`details.missing`
+列出缺失名）。工作流 = 一级导航"文件工具"→ 工具目录浏览 → 选择工具 →
+参数 JSON 提交 → 运行（sync 直答 / async 任务）→ 结果呈现/导出编辑器。
+复用 1.0 资产不重写：`processors/parity.py`（ocr_image/extract_exif/
+strip_exif/watermark/archive_images/encrypt_file/decrypt_file/
+base64_encode/base64_decode）、`processors/pdf_tools.py` 全部 7 函数、
+`processors/barcode.py`、`processors/ascii.py`、`processors/lut.py`、
+`processors/media.py`、`processors/compare.py`、`processors/histogram.py`、
+`processors/checksum.py`、`processors/ai.py`、`processors/ai_models.py`、
+`python_worker/adapters/filter_adapter.py` `write_preview`（§4 临时 PNG
+通道）。依赖诚实原则（总纲 Phase 7"模型和外部依赖状态必须真实"）：目录
+`available`/`optional_deps` 与提交时 `DEPENDENCY_MISSING` 用同一探测函数、
+不做缓存；`pdf.to_images` 接 pdf2image + poppler（requirements 既有依赖的
+接线，1.0 UI 仅提示未实现）；EAN-13 在 pystrich 缺失时拒绝（1.0 PIL 兜底
+生成非功能性伪条码，按"不以假乱真"不暴露）、DataMatrix 不注册（1.0 实现
+实为 QR 伪实现）；AI 重模型能力在无模型文件的机器默认 available=false
+（目录置灰 + 提交拒绝双保险），`ai.models.list` 只读（安装状态为真实文件
+探测，模型安装/下载不在本批动作面），`ai.upscale` 支持配置 EDSR 模型路径
+（settings.json `model_paths` 优先、`TOOLBOX_AI_MODEL_DIR` 环境目录其次，
+显式配置覆盖环境）走 OpenCV DNN，否则要求 upscayl + Real-ESRGAN 系统模型；
+`ai.denoise`/`ai.colorize` 为 OpenCV 核心启发式（1.0 神经路径本就不存在，
+不虚构）。如实边界：EXIF 按 Tag 编辑、图片→PDF、压缩实验室系、重复/相似
+查找、AI 深度图等 1.0 辅助能力未注册为协议动作（逐项见迁移矩阵）；
+工具页参数面板为参数 JSON 编辑器（逐工具表单化属后续批次）。
+状态口径（总纲 §14.2）：本批全部为 **code_complete / static_reviewed**；
+Linux 目标环境验收清单见 `docs/phase7-acceptance.md`（工具目录浏览 →
+OCR/PDF/小工具逐项 → 依赖缺失置灰路径 / AI 降级说明 / 实机项与 CI 项分列），
+未执行任何目标环境运行验证；迁移矩阵对应行按其状态取值规则保持
+**待迁移**（ui-migration-matrix.md 头部与 Phase 7 进度备注）。
+
+### Added（协议与 Worker）
+
+- `python_worker/protocol.py`：错误码 `ERR_DEPENDENCY_MISSING`
+  （protocol.py:21，§5 稳定错误码集合新增，既有错误码零改动）。
+- `python_worker/adapters/assist_adapter.py`（新文件）：assist.list 目录表
+  （`_TOOL_TABLE` 32 条目 + 15 类别 `category_label` 本地化）与逐动作接线；
+  依赖探测函数族（pytesseract+tesseract、pdf2image+poppler、qrcode、
+  pystrich、pyzbar（探测 `pyzbar.pyzbar`）、magick/ffmpeg、cryptography、
+  rembg+onnxruntime+模型文件、upscayl+系统模型/EDSR 配置路径）；参数校验
+  先于依赖判定；sync 小工具（checksum/histogram/ascii/exif/barcode.decode/
+  ai.models.list）与 async 任务工厂（其余 26 个，协作取消 + §4 临时 PNG
+  通道或文件结果；文本结果走 JSON、compare 指标非有限值 → `null`）；
+  `model_path_config()`（settings.json `model_paths` → 环境目录 → 显式
+  配置覆盖）。
+- `python_worker/dispatcher.py`：动作表注册 `assist.list` + 32 工具动作
+  （sync 6 个 dispatcher.py:52-58、async 26 个 dispatcher.py:75-103，处理
+  器统一注入会话临时目录 dispatcher.py:285-384）；capabilities.list 随
+  动作表自动纳入。
+- `docs/ipc-protocol.md`：§3 动作表 assist 段、§3.8 辅助工具目录与动作、
+  §5 错误码 `DEPENDENCY_MISSING`；2026-11-07 复查注两处措辞对齐实现
+  （`barcode.decode` 的 `rect` 键恒存在可空；`cryptography` 虽为
+  requirements 项仍按可选依赖探测——纯核心依赖 numpy/OpenCV/Pillow/pypdf
+  不探测）。纯新增：不删除字段、不改既有动作与错误码语义，`protocol`
+  保持 `1`（§8 兼容性规则）。
+
+### Added（C++ / QML 消费侧）
+
+- `native/models/assist_model.*`（新文件）：assist.list 目录行模型——五角色
+  `toolKey/toolName/categoryLabel/available/optionalDeps`（协议面保留的
+  `description`/`type` 不进角色面，消费方忽略未知字段口径同 §3.7
+  GeneratorModel）；缺 `available` 按不可用处理（宁可置灰不谎称可用）；
+  无 key 条目防御性跳过；整表重建 modelReset。
+- `native/services/assist_service.*`（新文件）：QML 单例 facade——
+  `loadTools()`（assist.list 拉取 + loadingTools 在途）与
+  `runTool(toolKey, paramsJson)`（条目 key 即动作名，原样上送；本地拒绝
+  空 key / 非对象 paramsJson）；sync/async 由响应形状判定（result 带
+  `task_id` = async 受理 `toolAccepted` + TaskModel 任务行登记，不带 =
+  sync 直答 `notifyToolResult`）；`DEPENDENCY_MISSING` 等提交前拒绝与
+  `task.failed`（含 CANCELLED）统一走 `assistError` 呈现通道；未跟踪帧
+  一律忽略（不越权认领其他动作的关联）。
+- `ui/components/AppToolsPage.qml` / `ui/pages/ToolsPage.qml`（新文件）：
+  统一工具页工作流（目录网格 + 置灰卡片 Tooltip（AppFilterCard 同源）→
+  参数 JSON 编辑器（本地 JSON 对象校验、内联报错）→ 运行单飞在途门 +
+  120s 看门狗 → 结果四态呈现（文本 / 文件列表 / 单图像 / 通用 JSON）+
+  导出到编辑器（StudioService.exportToEditor 委托））；宿主
+  ToolsPage 无状态，数据源 AssistService（组件不 sendAction）。
+- `native/app/application.cpp`：一级导航 `files` 从 PlannedPage 占位改路由
+  ToolsPage.qml（application.cpp:86-91，总纲 §9.9 统一工具页模板落地）；
+  `CMakeLists.txt` 注册上述源文件与 QML。
+
+### Added（测试）
+
+- `tests/test_worker_assist.py`（新文件，68 用例，进程内 Dispatcher +
+  TaskRuntime(max_workers=1)；依赖路径 mock 强制、成功路径 mock 到
+  processors 资产、核心依赖真实执行）：覆盖说明见 docs/phase7-acceptance.md
+  §1（目录形状与依赖诚实性、DEPENDENCY_MISSING 提交前返回、参数校验
+  优先、pdf.* 七资产往返、条形码三动作、小工具真实执行、LUT/媒体/EXIF/
+  水印/归档/加密/Base64、AI 注册表如实与模型路径配置、AI 四动作双路径）。
+  其中 4 组为本批覆盖核对后补齐：EAN-13 成功接线、convert_animation 成功
+  接线（fmt 缺省取 output 扩展名）、pdf.merge paths 非空数组、histogram
+  luma 形状。
+- `tests/native/test_assist_model.cpp`（新文件，6 用例，
+  QAbstractItemModelTester）与 `tests/native/test_assist_service.cpp`
+  （新文件，8 用例，信号模拟不启动 Worker）：消费侧契约锁定
+  （角色面/reloadFrom 形状/未绑定与本地拒绝/在途生命周期/sync 直答/
+  async 受理与终态/UNKNOWN_ACTION/任务行登记），`tests/native/
+  CMakeLists.txt` 注册 assist_model / assist_service 两目标。
+
 ## 2026-11-07 (Phase 6+ 改进批次 — 滤镜链参数化 undo + 滑杆命令合并)
 
 依据 docs/competitive-analysis.md §4 行动项 1/2（darktable/Lightroom 参数

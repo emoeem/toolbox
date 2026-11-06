@@ -56,6 +56,25 @@
 > 暂不可用）、photomosaic / fusion（1.0 中为文件→文件工具而非参数驱动的
 > 生成器，协议不注册）。
 
+> **Phase 7 进度备注（2026-11-07）**：辅助工具垂直切片（统一工具页：目录
+> 浏览 assist.list → 选择工具 → 参数 JSON 提交 → 运行（sync 直答 / async
+> 任务）→ 结果呈现/导出编辑器；OCR / PDF×8 / 条形码×3 / ASCII / 对比 /
+> 校验和 / 直方图 / LUT / 媒体×2 / EXIF×2 / 水印 / 归档 / 加密×2 /
+> Base64×2 / AI×5 共 32 个工具动作 + 新错误码 `DEPENDENCY_MISSING`）已在
+> 工作区实现（协议 docs/ipc-protocol.md §3.8 + Worker
+> assist_adapter/dispatcher + C++ AssistService/AssistModel + QML
+> AppToolsPage/ToolsPage + 一级导航 "files" 接线；截至本备注撰写未提交），
+> 状态口径 `code_complete / static_reviewed`（CHANGELOG Phase 7 条目）。按
+> 本文件头部规则，§1/§3/§5/§6/§7 相关行状态仍为 **`待迁移`**，括注仅为
+> 进度说明而非状态档位；实机验收清单见 docs/phase7-acceptance.md（工具
+> 目录浏览→OCR/PDF/小工具逐项→依赖缺失置灰路径 / AI 降级说明 / 实机项与
+> CI 项分列），通过后统一改判 `已迁移` 并回填验收记录。该批不含（协议未
+> 注册，行内括注逐项如实）：EXIF 按 Tag 编辑、图片→PDF、压缩实验室/
+> 按体积压缩、重复/相似图片查找、AI 深度图、DataMatrix（1.0 实现为 QR
+> 伪实现，不凭空造实现）、EAN-13 的 PIL 兜底伪条码（依赖缺失即拒绝）；
+> AI 模型安装/下载不在动作面（`ai.models.list` 只读）；工具页参数面板为
+> 参数 JSON 编辑器（逐工具表单化属后续批次）。
+
 ## 0. 全局功能（不属于单一工具）
 
 | 现有功能 | 旧入口 | Phase | 状态 |
@@ -83,7 +102,7 @@
 | 变换（旋转/90°/翻转/缩放） | `1881` | `core.rotate/flip_h/flip_v/scale` | — | 4 第三批 | 待迁移（Phase 5 已接入旋转90°/水平翻转/垂直翻转；crop/scale 有协议支持、无 UI 入口，待实机验收） |
 | 滤镜（78 内置，可搜索调参预览） | `944` | `FilterDefRegistry` + `filters.ALL_FILTERS` | opencv/skimage | 4 第四批 | 待迁移（Phase 6A 已实现滤镜页签：目录浏览/搜索、FilterDef 参数控件、不可用滤镜置灰 + 原因、整链预览与应用；预览缓存未实现，待实机验收） |
 | 滤镜链（增删/排序/启停/预设持久化） | `1000-1244` | `filter_chain` + `filter_presets` | — | 4 第四批 | 待迁移（Phase 6A 已实现链增删/↑↓排序/启停与 `filter.presets.*` 四动作保存/加载/删除接线；拖拽排序未实现（↑/↓ 代替），待实机验收） |
-| LUT / 色调曲线 | `3096` | `lut.apply_lut/tone_curve`（.cube 加载 UI 未接） | — | 4 第四批 | 待迁移（补 .cube；Phase 6A 滤镜页签未含 LUT——协议无 `lut.*` 动作，.cube 加载仍无 UI） |
+| LUT / 色调曲线 | `3096` | `lut.apply_lut/tone_curve`（.cube 加载 UI 未接） | — | 4 第四批 | 待迁移（补 .cube；Phase 7 协议新增 `lut.apply` 动作（.cube 解析失败提交前拒绝）并以工具页条目承载——参数 JSON 提交，逐工具表单化 UI 未做；色调曲线未迁移） |
 | 高级胶片滤镜（45+） | `4279` | `advanced_filters`（75 函数） | numpy/cv2 | 4 第四批 | 待迁移 |
 | 色彩工具（反色/灰度/均衡/CLAHE/暗角/5 色调色板） | `1712` | `core.invert/grayscale/histogram_equalize/clahe/vignette` | — | 4 第三批 | 待迁移 |
 | 格式转换（PNG/JPEG/WebP/TIFF/BMP/HEIC/AVIF/JXL/ICO） | `1378` | `utils.save_image` | pillow-heif/avif/jxl 可选 | 4 第一批 | 待迁移 |
@@ -110,7 +129,7 @@
 | 拼接/拼贴（横纵/网格/分割）+ 快速拼图 | `2910`、`4231` | `stitch.*` + `parity.contact-sheet/collage` | — | 5 | 待迁移 |
 | 分割/堆叠/切割 | `3763` | `parity.split-grid/stack/cut` | — | 5 | 待迁移 |
 | 形状蒙版 | `2643` | `shapes.apply_shape_mask` + `SHAPE_PRESETS` | — | 5 | 待迁移 |
-| 绘图/标注（文字/边框/自动裁边/水印） | `3910` | `parity.text/border/auto-crop/watermark` | Pillow | 5（绘图与标注） | 待迁移 |
+| 绘图/标注（文字/边框/自动裁边/水印） | `3910` | `parity.text/border/auto-crop/watermark` | Pillow | 5（绘图与标注） | 待迁移（Phase 7 协议仅收 `watermark.text` 文字水印并以工具页条目承载；文字/边框/自动裁边未注册） |
 | 调色板/颜色库（提取/取色/替换/PDF） | `3832` | `parity.palette/color-sample/color-replace/palette-pdf` | reportlab（PDF） | 5 | 待迁移 |
 
 ## 4. 批量工具（Phase 5）
@@ -125,36 +144,36 @@
 
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
-| 直方图（RGB/Luma/HSV，PIL 绘制） | `2673` | `histogram.*` | Pillow | 6（编辑器集成候选，Phase 4 评估） | 待迁移 |
-| 图像比较（MAE/RMSE/PSNR/NCC/SSIM + 差异图） | `2740` | `compare.compare/difference_image` | scikit-image | 6 | 待迁移 |
-| 文件校验和（MD5/SHA*/CRC32/Blake2） | `2788` | `checksum.all_hashes/file_hashes`（"xxhash"为自实现近似，注意） | — | 6 | 待迁移 |
+| 直方图（RGB/Luma/HSV，PIL 绘制） | `2673` | `histogram.*` | Pillow | 6（编辑器集成候选，Phase 4 评估） | 待迁移（Phase 7 协议 `histogram.compute` rgb/luma/hsv 三模式已实现并以工具页 JSON 结果承载；PIL 绘制图表与编辑器集成未迁移） |
+| 图像比较（MAE/RMSE/PSNR/NCC/SSIM + 差异图） | `2740` | `compare.compare/difference_image` | scikit-image | 6 | 待迁移（Phase 7 协议 `compare.images` 六指标已实现（非有限值 → null）；差异图未迁移） |
+| 文件校验和（MD5/SHA*/CRC32/Blake2） | `2788` | `checksum.all_hashes/file_hashes`（"xxhash"为自实现近似，注意） | — | 6 | 待迁移（Phase 7 协议 `checksum.file` 七算法 + size 已实现并以工具页承载） |
 | 查找（重复/相似/信息） | `4055` | `parity.duplicate-finder/similar/image-info` | Pillow | 6 | 待迁移 |
-| EXIF（读取/按 Tag 编辑/删除） | `1518` | `parity.edit_exif`（PIL getexif） | Pillow | 6 | 待迁移 |
+| EXIF（读取/按 Tag 编辑/删除） | `1518` | `parity.edit_exif`（PIL getexif） | Pillow | 6 | 待迁移（Phase 7 协议 `exif.extract` / `exif.strip` 已实现；按 Tag 编辑未注册） |
 
 ## 6. AI 工具（Phase 6）
 
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
-| AI 抠图（4 模型/Alpha Matting/换底/人像虚化） | `2335` | `ai.remove_background/composite_on_bg/portrait_bokeh` | **rembg + onnxruntime** 可选 | 6 | 待迁移 |
-| AI Upscale（2x-8x；Lanczos/Bicubic/AI） | `2412` | `ai.upscale_*`；AI 路径硬编码 `/usr/bin/upscayl*` | **upscayl** 外部程序 | 6 | 待迁移（upscayl 路径需可配置） |
-| AI 降噪（NLM/双边/中值/小波） | `2467` | `ai.denoise_*` | cv2 | 6 | 待迁移 |
-| AI 深度图（启发式/U²-Net/ISNet） | `2604` | `ai.depth_map/depth_map_rembg` | rembg 可选 | 6 | 待迁移 |
-| AI 色彩化/风格化（纯 numpy 实现，非真 AI 模型） | `2501` | `ai.colorize_transfer/ai_enhance` | — | 6 | 待迁移（状态如实标注为算法模拟） |
-| AI 模型管理器（安装/删除/后端切换） | `2539` | `ai_models.registry/install/uninstall/set_backend/detect_backends` | rembg 缓存目录 | 6 | 待迁移 |
+| AI 抠图（4 模型/Alpha Matting/换底/人像虚化） | `2335` | `ai.remove_background/composite_on_bg/portrait_bokeh` | **rembg + onnxruntime** 可选 | 6 | 待迁移（Phase 7 协议 `ai.background.remove` 已实现：rembg+onnxruntime+模型文件三重探测，缺失 → 置灰 + `DEPENDENCY_MISSING`；`background` 参数换底；Alpha Matting/人像虚化未注册） |
+| AI Upscale（2x-8x；Lanczos/Bicubic/AI） | `2412` | `ai.upscale_*`；AI 路径硬编码 `/usr/bin/upscayl*` | **upscayl** 外部程序 | 6 | 待迁移（Phase 7 协议 `ai.upscale` 已实现：EDSR 模型路径可配置（settings `model_paths`/`TOOLBOX_AI_MODEL_DIR`，OpenCV DNN）优先，否则 upscayl + Real-ESRGAN 系统模型——"路径需可配置"已落地；Lanczos/Bicubic 预设未注册） |
+| AI 降噪（NLM/双边/中值/小波） | `2467` | `ai.denoise_*` | cv2 | 6 | 待迁移（Phase 7 协议 `ai.denoise` 已实现（NLM，OpenCV 核心恒可用）；双边/中值/小波变体未注册） |
+| AI 深度图（启发式/U²-Net/ISNet） | `2604` | `ai.depth_map/depth_map_rembg` | rembg 可选 | 6 | 待迁移（Phase 7 协议未收深度图动作） |
+| AI 色彩化/风格化（纯 numpy 实现，非真 AI 模型） | `2501` | `ai.colorize_transfer/ai_enhance` | — | 6 | 待迁移（Phase 7 协议 `ai.colorize` simple/transfer 已实现——状态仍如实标注为算法模拟非模型） |
+| AI 模型管理器（安装/删除/后端切换） | `2539` | `ai_models.registry/install/uninstall/set_backend/detect_backends` | rembg 缓存目录 | 6 | 待迁移（Phase 7 协议 `ai.models.list` 只读视图已实现（注册表真实安装状态/后端探测/模型路径配置）；安装/删除/后端切换不在动作面） |
 
 ## 7. 文件工具（Phase 6）
 
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
-| 图片→PDF（A4/A3/Letter） | `1422` | PIL 直存 | Pillow | 6 | 待迁移 |
-| PDF 高级（合并/拆分/旋转/删页/提取文本/加密） | `2033` | `pdf_tools.*` | pypdf；pdf2image 仅声明未使用（PDF→图未实现，UI 仅提示） | 6 | 待迁移（如实标注未实现项） |
-| OCR（6 语言/4 布局） | `1601` | pytesseract 直调 + `parity.ocr_to_file` | **tesseract** | 6 | 待迁移 |
-| 压缩/打包（ZIP） | `2111` | stdlib zipfile | — | 6 | 待迁移 |
-| 加密/Base64（fernet 文件加密、编码解码） | `3686` | `parity.base64-*/encrypt/decrypt/archive` | cryptography | 6 | 待迁移 |
-| 压缩实验室（JPEG/WebP 质量滑杆/按 KB/格式转换） | `3986` | `parity.compress/webp/weight-resize/convert` | Pillow | 6 | 待迁移 |
+| 图片→PDF（A4/A3/Letter） | `1422` | PIL 直存 | Pillow | 6 | 待迁移（Phase 7 协议未收图片→PDF 动作） |
+| PDF 高级（合并/拆分/旋转/删页/提取文本/加密） | `2033` | `pdf_tools.*` | pypdf；pdf2image 仅声明未使用（PDF→图未实现，UI 仅提示） | 6 | 待迁移（Phase 7 协议 `pdf.merge/split/rotate/remove_pages/extract_text/set_metadata/protect` 已实现；"PDF→图"经 `pdf.to_images` 真实接线（pdf2image + poppler，1.0 仅提示的未实现项落地），工具页承载；1.0 表单化面板未迁移——参数 JSON 提交） |
+| OCR（6 语言/4 布局） | `1601` | pytesseract 直调 + `parity.ocr_to_file` | **tesseract** | 6 | 待迁移（Phase 7 协议 `ocr.run`（lang/psm，pytesseract+tesseract 双探测）已实现并以工具页承载；6 语言/4 布局表单化 UI 未做） |
+| 压缩/打包（ZIP） | `2111` | stdlib zipfile | — | 6 | 待迁移（Phase 7 协议 `archive.create` 已实现并以工具页承载） |
+| 加密/Base64（fernet 文件加密、编码解码） | `3686` | `parity.base64-*/encrypt/decrypt/archive` | cryptography | 6 | 待迁移（Phase 7 协议 `crypto.encrypt/decrypt`、`base64.encode/decode` 已实现——cryptography 缺失时置灰 + `DEPENDENCY_MISSING`） |
+| 压缩实验室（JPEG/WebP 质量滑杆/按 KB/格式转换） | `3986` | `parity.compress/webp/weight-resize/convert` | Pillow | 6 | 待迁移（Phase 7 协议未收压缩实验室动作） |
 | 尺寸/体积缩放 | `4181` | `parity.limits-resize/weight-resize/convert` | Pillow | 6 | 待迁移 |
-| 条形码/二维码（生成 QR/解码） | `2830` | `barcode.generate_qr/decode_qr` | qrcode、pyzbar 可选 | 6 | 待迁移 |
-| 动画（GIF/WebP/APNG 合成与拆帧） | `1974` | `media.convert_animation/extract_frames` | **ImageMagick、ffmpeg** | 6 | 待迁移 |
+| 条形码/二维码（生成 QR/解码） | `2830` | `barcode.generate_qr/decode_qr` | qrcode、pyzbar 可选 | 6 | 待迁移（Phase 7 协议 `barcode.qr.generate/ean13.generate/decode` 已实现——EAN-13 需 pystrich、PIL 伪码兜底不暴露；DataMatrix 未注册） |
+| 动画（GIF/WebP/APNG 合成与拆帧） | `1974` | `media.convert_animation/extract_frames` | **ImageMagick、ffmpeg** | 6 | 待迁移（Phase 7 协议 `media.extract_frames/convert_animation` 已实现（magick/ffmpeg 按 fmt 如实探测，缺失置灰）） |
 
 ## 8. 设置（Phase 3）
 
@@ -172,6 +191,9 @@
 - 外部依赖汇总（新 UI 需保留诊断能力）：**gmic、ImageMagick(magick)、ffmpeg、
   tesseract、glslangValidator、upscayl(-bin)**；可选 Python 包：rembg、onnxruntime、
   qrcode、pyzbar、cryptography、reportlab、mutagen、numba、pillow-heif/avif/jxl。
-- 已知未实现/降级项（迁移时必须保持真实标注）：PDF→图片（仅提示）、.cube LUT 加载
-  （无 UI）、AI 色彩化（算法模拟非模型）、批量重命名 `processors/batch.py:101`
-  （双实现未接 UI）、`checksum` 的 xxhash 为自实现近似。
+- 已知未实现/降级项（迁移时必须保持真实标注）：.cube LUT 加载（Phase 7 已有
+  `lut.apply` 协议动作 + 工具页条目，逐工具表单化 UI 未做）、AI 色彩化（算法
+  模拟非模型）、批量重命名 `processors/batch.py:101`
+  （双实现未接 UI）、`checksum` 的 xxhash 为自实现近似；PDF→图片已由
+  Phase 7 `pdf.to_images` 真实接线（pdf2image + poppler——1.0 的"仅提示"
+  未实现项落地，缺 poppler 时置灰 + `DEPENDENCY_MISSING`）。

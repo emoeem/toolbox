@@ -83,8 +83,11 @@ void Application::buildCatalog() {
     m_navModel.addEntry({QStringLiteral("ai"), QStringLiteral("AI"),
                          QStringLiteral("qrc:/Toolbox/ui/pages/PlannedPage.qml"), false,
                          QStringLiteral("P2")});
+    // Phase 7：文件工具入口（总纲 §9.9 统一工具页模板，AppToolsPage 承载
+    // AssistService 工具目录/参数/结果工作流），替代 Phase 4 的 PlannedPage
+    // 占位（product-information-architecture.md §2 FilesPage 条目的落地）。
     m_navModel.addEntry({QStringLiteral("files"), QStringLiteral("文件工具"),
-                         QStringLiteral("qrc:/Toolbox/ui/pages/PlannedPage.qml"), false,
+                         QStringLiteral("qrc:/Toolbox/ui/pages/ToolsPage.qml"), true,
                          QStringLiteral("P2")});
     m_navModel.addEntry({QStringLiteral("settings"), QStringLiteral("设置"),
                          QStringLiteral("qrc:/Toolbox/ui/pages/SettingsPage.qml"), true,

@@ -260,3 +260,44 @@ target_sources(test_studio_service PRIVATE
 target_include_directories(test_studio_service PRIVATE
     ${CMAKE_SOURCE_DIR}/native
 )
+
+# AssistModel：纯数据模型（不连 BackendManager），填充经 Q_INVOKABLE
+#（reloadFrom），测试直接构造即可；同 test_generator_model 模式。
+# QAbstractItemModelTester 需 Qt6::Test，QML_ELEMENT 元类型需 Qt6::Qml。
+qt_add_executable(test_assist_model test_assist_model.cpp)
+target_link_libraries(test_assist_model PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME assist_model COMMAND test_assist_model)
+target_sources(test_assist_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/models/assist_model.cpp
+)
+target_include_directories(test_assist_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)
+
+# AssistService：消费 BackendManager 信号（测试直接发射，同 test_studio_service
+# 模式），async 工具受理经 bindTaskModel 登记任务行，故 models/（assist +
+# task）与 backend/（BackendManager + PythonWorker + 协议编码器）源一并编入。
+# 无 DocumentService/SettingsService 委托（assist 不触碰文档与最近文件），
+# 不需要 core/、services/settings 源。QML 单例工厂需 Qt6::Qml。
+qt_add_executable(test_assist_service test_assist_service.cpp)
+target_link_libraries(test_assist_service PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME assist_service COMMAND test_assist_service)
+target_sources(test_assist_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/services/assist_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/assist_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/task_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/python_worker.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/ipc_protocol.cpp
+)
+target_include_directories(test_assist_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)
