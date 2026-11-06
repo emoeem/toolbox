@@ -10,7 +10,10 @@
 namespace toolbox {
 
 class BackendManager;
-class TaskModel;
+
+// TaskModel 必须完整包含：moc 生成的元类型注册代码对信号/属性里的指针类型
+// 做 sizeof（CI 实证 incomplete type），前置声明不够。
+#include "models/task_model.h"
 
 // Document-facing facade over the Worker protocol (docs/ipc-protocol.md §3):
 // one current document plus the Phase 4 edit actions. image.open / image.save
