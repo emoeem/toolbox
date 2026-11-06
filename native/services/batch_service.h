@@ -104,7 +104,7 @@ class BatchService : public QObject {
     };
 
     BackendManager *m_backend = nullptr;
-    BatchModel *m_batchModel = nullptr;       // 本服务创建并持有
+    BatchModel *m_batchModel = nullptr;         // 本服务创建并持有
     QHash<QString, Pending> m_pendingByRequest; // request_id → 提交上下文
     QString m_activeRequestId; // 当前活动批次的受理来源提交号（受理时登记，
                                // cancelBatch 把 startBatch 返回值翻译成

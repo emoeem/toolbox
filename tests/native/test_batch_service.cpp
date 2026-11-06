@@ -59,8 +59,7 @@ QJsonObject successResponse(const QString &requestId, const QJsonObject &result)
     };
 }
 
-QJsonObject failedResponse(const QString &requestId, const QString &code,
-                           const QString &message) {
+QJsonObject failedResponse(const QString &requestId, const QString &code, const QString &message) {
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("request_id"), requestId},
@@ -194,9 +193,9 @@ void TestBatchService::defaultsAndUnboundBackend() {
     QCOMPARE(service.batchModel()->totalCount(), 0);
 
     const int n = probeSlot(m_backend);
-    const QString submitted = service.startBatch(
-        threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), 85,
-        QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
+    const QString submitted =
+        service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), 85,
+                           QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     QCOMPARE(submitted, QString()); // 空返回值 = 未上送
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("INTERNAL"));
@@ -215,18 +214,18 @@ void TestBatchService::localRejectionsWhileBound() {
 
     const int n = probeSlot(m_backend);
     // 空文件列表（§9.4：文件与输出目录是批次的最小配置）。
-    const QString noFiles = service.startBatch(
-        {}, QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-        QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
+    const QString noFiles =
+        service.startBatch({}, QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
+                           QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     QCOMPARE(noFiles, QString());
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("INVALID_PARAMS"));
     QCOMPARE(errors.at(0).at(1).toString(), QStringLiteral("批量文件列表为空"));
 
     // 空输出目录。
-    const QString noDir = service.startBatch(
-        threePaths(), QString(), QStringLiteral("PNG"), -1, QStringLiteral("pattern"),
-        QStringLiteral("{name}_{i}"), QJsonArray{});
+    const QString noDir =
+        service.startBatch(threePaths(), QString(), QStringLiteral("PNG"), -1,
+                           QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     QCOMPARE(noDir, QString());
     QCOMPARE(errors.count(), 2);
     QCOMPARE(errors.at(1).at(0).toString(), QStringLiteral("INVALID_PARAMS"));
@@ -234,9 +233,9 @@ void TestBatchService::localRejectionsWhileBound() {
 
     // steps 允许为空（纯格式转换批次），不构成拒绝——提交号照常发出（响应
     // 全流程由 acceptanceBuildsPendingRows 锁定）。
-    const QString submitted = service.startBatch(
-        threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-        QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
+    const QString submitted =
+        service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
+                           QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     QCOMPARE(submitted, reqId(n + 1)); // 两次拒绝零上送，本次提交是第 1 个槽位
 }
 
@@ -248,14 +247,14 @@ void TestBatchService::acceptanceBuildsPendingRows() {
     QSignalSpy errors(&service, &BatchService::batchError);
 
     const int n = probeSlot(m_backend);
-    const QString submitted = service.startBatch(
-        threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("JPEG"), 85,
-        QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
-    QCOMPARE(submitted, reqId(n + 1)); // 提交关联号 request_id
+    const QString submitted =
+        service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("JPEG"), 85,
+                           QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
+    QCOMPARE(submitted, reqId(n + 1));             // 提交关联号 request_id
     QCOMPARE(service.batchModel()->rowCount(), 0); // 响应前不造行（不伪造进度）
 
-    emit m_backend.responseReady(reqId(n + 1), acceptedResponse(reqId(n + 1),
-                                                                QStringLiteral("task-1")));
+    emit m_backend.responseReady(reqId(n + 1),
+                                 acceptedResponse(reqId(n + 1), QStringLiteral("task-1")));
 
     QCOMPARE(started.count(), 1);
     QCOMPARE(started.at(0).at(0).toString(), QStringLiteral("task-1")); // task_id 唯一交付路径
@@ -284,22 +283,19 @@ void TestBatchService::syncRejectionKeepsModelUntouched() {
     // 上一批次的行留在模型里（真实场景：上一批完成后再次提交被拒）。
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 1),
                                  acceptedResponse(reqId(n + 1), QStringLiteral("task-0")));
     QCOMPARE(service.batchModel()->rowCount(), 3);
 
     // 新批次被同步拒绝（当前 Worker 无 batch.start → UNKNOWN_ACTION，§5）。
     const QString submitted = service.startBatch(
-        {QStringLiteral("/tmp/src/other.png")}, QStringLiteral("/tmp/out"),
-        QStringLiteral("PNG"), -1, QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-        QJsonArray{});
+        {QStringLiteral("/tmp/src/other.png")}, QStringLiteral("/tmp/out"), QStringLiteral("PNG"),
+        -1, QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     QCOMPARE(submitted, reqId(n + 2));
-    emit m_backend.responseReady(
-        reqId(n + 2),
-        failedResponse(reqId(n + 2), QStringLiteral("UNKNOWN_ACTION"),
-                       QStringLiteral("未知动作: batch.start")));
+    emit m_backend.responseReady(reqId(n + 2),
+                                 failedResponse(reqId(n + 2), QStringLiteral("UNKNOWN_ACTION"),
+                                                QStringLiteral("未知动作: batch.start")));
 
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("UNKNOWN_ACTION"));
@@ -320,8 +316,7 @@ void TestBatchService::missingTaskIdIsProtocolViolation() {
 
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     // 成功响应缺 task_id：batch.start 是异步动作（§2.3），缺失即协议违约，
     // 不伪造受理（该提交永远不会有事件跟进）。
     emit m_backend.responseReady(
@@ -343,21 +338,17 @@ void TestBatchService::perFileProgressUpdatesRows() {
 
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 1),
                                  acceptedResponse(reqId(n + 1), QStringLiteral("task-1")));
 
     // 逐文件进度：file 行键 + state/progress 原样映射进行（§9.4 单项进度）。
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"),
-                      QStringLiteral("running"), 30));
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"),
-                      QStringLiteral("done"), 100));
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-1"), QStringLiteral("/tmp/src/b.png"),
-                      QStringLiteral("failed"), 20));
+    emit m_backend.taskEvent(progressEvent(
+        QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"), QStringLiteral("running"), 30));
+    emit m_backend.taskEvent(progressEvent(
+        QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"), QStringLiteral("done"), 100));
+    emit m_backend.taskEvent(progressEvent(
+        QStringLiteral("task-1"), QStringLiteral("/tmp/src/b.png"), QStringLiteral("failed"), 20));
 
     const auto model = service.batchModel();
     QCOMPARE(model->index(0, 0).data(BatchModel::BatchStateRole).toString(),
@@ -377,9 +368,9 @@ void TestBatchService::perFileProgressUpdatesRows() {
     QCOMPARE(model->index(2, 0).data(BatchModel::BatchProgressRole).toInt(), 0);
 
     // 未知/过期批次的事件：忽略。
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-ghost"), QStringLiteral("/tmp/src/c.png"),
-                      QStringLiteral("done"), 100));
+    emit m_backend.taskEvent(progressEvent(QStringLiteral("task-ghost"),
+                                           QStringLiteral("/tmp/src/c.png"), QStringLiteral("done"),
+                                           100));
     QCOMPARE(model->index(2, 0).data(BatchModel::BatchStateRole).toString(),
              QStringLiteral("pending"));
 }
@@ -393,21 +384,22 @@ void TestBatchService::completedItemsRefreshRows() {
 
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 1),
                                  acceptedResponse(reqId(n + 1), QStringLiteral("task-1")));
 
     // 完成事件的 result.items 全量补登（逐文件事件遗漏的终态与输出路径一次
     // 补齐；形状对照 processors/batch_filter_chain.py BatchItemResult 的 2.0
     // 词汇映射 succeeded→done）。
-    emit m_backend.taskEvent(completedEvent(QStringLiteral("task-1"), QJsonArray{
-        item(QStringLiteral("/tmp/src/a.png"), QStringLiteral("done"), {},
-             QStringLiteral("/tmp/out/a.png")),
-        item(QStringLiteral("/tmp/src/b.png"), QStringLiteral("failed"),
-             QStringLiteral("解码失败")),
-        item(QStringLiteral("/tmp/src/c.png"), QStringLiteral("skipped")),
-    }));
+    emit m_backend.taskEvent(
+        completedEvent(QStringLiteral("task-1"),
+                       QJsonArray{
+                           item(QStringLiteral("/tmp/src/a.png"), QStringLiteral("done"), {},
+                                QStringLiteral("/tmp/out/a.png")),
+                           item(QStringLiteral("/tmp/src/b.png"), QStringLiteral("failed"),
+                                QStringLiteral("解码失败")),
+                           item(QStringLiteral("/tmp/src/c.png"), QStringLiteral("skipped")),
+                       }));
 
     QCOMPARE(finished.count(), 1);
     QCOMPARE(finished.at(0).at(0).toString(), QStringLiteral("task-1"));
@@ -436,21 +428,17 @@ void TestBatchService::cancelledFailureSweepsToSkipped() {
 
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 1),
                                  acceptedResponse(reqId(n + 1), QStringLiteral("task-1")));
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"),
-                      QStringLiteral("done"), 100));
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-1"), QStringLiteral("/tmp/src/b.png"),
-                      QStringLiteral("running"), 40));
+    emit m_backend.taskEvent(progressEvent(
+        QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"), QStringLiteral("done"), 100));
+    emit m_backend.taskEvent(progressEvent(
+        QStringLiteral("task-1"), QStringLiteral("/tmp/src/b.png"), QStringLiteral("running"), 40));
 
     // §7：取消以 task.failed + CANCELLED 呈现；残余 pending/running 行收尾为
     // skipped（batch_filter_chain.py 取清扫掠的 2.0 词汇映射）。
-    emit m_backend.taskEvent(failedEvent(QStringLiteral("task-1"),
-                                         QStringLiteral("CANCELLED"),
+    emit m_backend.taskEvent(failedEvent(QStringLiteral("task-1"), QStringLiteral("CANCELLED"),
                                          QStringLiteral("任务已取消")));
 
     QCOMPARE(errors.count(), 1);
@@ -475,17 +463,14 @@ void TestBatchService::nonCancelledFailureKeepsRows() {
 
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 1),
                                  acceptedResponse(reqId(n + 1), QStringLiteral("task-1")));
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"),
-                      QStringLiteral("running"), 25));
+    emit m_backend.taskEvent(progressEvent(
+        QStringLiteral("task-1"), QStringLiteral("/tmp/src/a.png"), QStringLiteral("running"), 25));
 
     // 非 CANCELLED 失败（如 Worker 崩溃恢复的 INTERNAL）：行保持最后已知状态。
-    emit m_backend.taskEvent(failedEvent(QStringLiteral("task-1"),
-                                         QStringLiteral("ENGINE_ERROR"),
+    emit m_backend.taskEvent(failedEvent(QStringLiteral("task-1"), QStringLiteral("ENGINE_ERROR"),
                                          QStringLiteral("处理器执行异常")));
 
     QCOMPARE(errors.count(), 1);
@@ -509,8 +494,7 @@ void TestBatchService::singleActiveBatchSemantics() {
 
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 1),
                                  acceptedResponse(reqId(n + 1), QStringLiteral("task-1")));
     QCOMPARE(service.batchModel()->rowCount(), 3);
@@ -518,8 +502,7 @@ void TestBatchService::singleActiveBatchSemantics() {
     // 第二个批次受理：单活动批次语义——覆盖旧跟踪，模型整表重建为新清单。
     const QStringList next{QStringLiteral("/tmp/src/next.png")};
     service.startBatch(next, QStringLiteral("/tmp/out2"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 2),
                                  acceptedResponse(reqId(n + 2), QStringLiteral("task-2")));
     QCOMPARE(started.count(), 2);
@@ -528,16 +511,16 @@ void TestBatchService::singleActiveBatchSemantics() {
              QStringLiteral("/tmp/src/next.png"));
 
     // 旧批次 task-1 的迟到事件：按 task_id 不匹配忽略，不触碰新批次行。
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-1"), QStringLiteral("/tmp/src/next.png"),
-                      QStringLiteral("failed"), 5));
+    emit m_backend.taskEvent(progressEvent(QStringLiteral("task-1"),
+                                           QStringLiteral("/tmp/src/next.png"),
+                                           QStringLiteral("failed"), 5));
     QCOMPARE(service.batchModel()->index(0, 0).data(BatchModel::BatchStateRole).toString(),
              QStringLiteral("pending"));
 
     // 新批次的事件照常关联。
-    emit m_backend.taskEvent(
-        progressEvent(QStringLiteral("task-2"), QStringLiteral("/tmp/src/next.png"),
-                      QStringLiteral("running"), 10));
+    emit m_backend.taskEvent(progressEvent(QStringLiteral("task-2"),
+                                           QStringLiteral("/tmp/src/next.png"),
+                                           QStringLiteral("running"), 10));
     QCOMPARE(service.batchModel()->index(0, 0).data(BatchModel::BatchStateRole).toString(),
              QStringLiteral("running"));
 }
@@ -549,8 +532,7 @@ void TestBatchService::cancelBatchForwarding() {
 
     const int n = probeSlot(m_backend);
     service.startBatch(threePaths(), QStringLiteral("/tmp/out"), QStringLiteral("PNG"), -1,
-                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"),
-                       QJsonArray{});
+                       QStringLiteral("pattern"), QStringLiteral("{name}_{i}"), QJsonArray{});
     emit m_backend.responseReady(reqId(n + 1),
                                  acceptedResponse(reqId(n + 1), QStringLiteral("task-1")));
 

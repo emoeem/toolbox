@@ -13,8 +13,7 @@ BatchService *s_instance = nullptr; // process-wide singleton identity
 
 } // namespace
 
-BatchService::BatchService(QObject *parent)
-    : QObject(parent), m_batchModel(new BatchModel(this)) {}
+BatchService::BatchService(QObject *parent) : QObject(parent), m_batchModel(new BatchModel(this)) {}
 
 BatchService::~BatchService() {
     if (s_instance == this)
@@ -62,8 +61,7 @@ QString BatchService::startBatch(const QStringList &paths, const QString &output
         // BackendManager::errorOccurred 的 WORKER_START_FAILED 只覆盖进程层面；
         // 这里是调用层面未接线，归入未分类的内部错误（§5，document_service.cpp
         // 同款处置）。本次调用未发出，但 QML 可能已按"已提交"置位——如实上报。
-        emit batchError(QStringLiteral("INTERNAL"),
-                        QStringLiteral("后端未绑定，无法执行批量任务"));
+        emit batchError(QStringLiteral("INTERNAL"), QStringLiteral("后端未绑定，无法执行批量任务"));
         return {};
     }
     QJsonObject params{
@@ -76,8 +74,7 @@ QString BatchService::startBatch(const QStringList &paths, const QString &output
     };
     if (quality >= 0)
         params.insert(QStringLiteral("quality"), quality);
-    const QString requestId =
-        m_backend->sendAction(QStringLiteral("batch.start"), params);
+    const QString requestId = m_backend->sendAction(QStringLiteral("batch.start"), params);
     // 受理上下文只登记在 m_pendingByRequest；m_activeRequestId 留给受理响应
     // 登记（onResponseReady）——在途提交号不进翻译键，避免拒绝后误翻译。
     if (!requestId.isEmpty())
@@ -90,8 +87,7 @@ void BatchService::cancelBatch(const QString &taskId) {
         return;
     // 提交号翻译：startBatch 同步返回 request_id，受理后自动翻译成 task_id，
     // QML 两种令牌都能传（翻译仅在活动批次上成立，其余 id 原样转发）。
-    const QString target =
-        (taskId == m_activeRequestId && !m_taskId.isEmpty()) ? m_taskId : taskId;
+    const QString target = (taskId == m_activeRequestId && !m_taskId.isEmpty()) ? m_taskId : taskId;
     m_backend->cancelTask(target);
 }
 
@@ -119,8 +115,7 @@ void BatchService::onResponseReady(const QString &requestId, const QJsonObject &
     if (taskId.isEmpty()) {
         // 协议违约：batch.start 是异步动作，成功响应必带 task_id（§2.3）；
         // 不伪造受理——该提交永远不会有事件跟进，必须按未落定上报。
-        emit batchError(QStringLiteral("INTERNAL"),
-                        QStringLiteral("batch.start 响应缺少 task_id"));
+        emit batchError(QStringLiteral("INTERNAL"), QStringLiteral("batch.start 响应缺少 task_id"));
         return;
     }
 
@@ -171,10 +166,10 @@ void BatchService::onTaskEvent(const QJsonObject &event) {
         // 完成结果可选携带 items 全量数组（{file, state, progress?, error?,
         // output_path?}）：把逐文件事件遗漏的终态（如整体失败文件、输出路径）
         // 一次补齐；未携带 items 时行保持已收敛状态，不空转重置。
-        const QJsonArray items =
-            event.value(QStringLiteral("result")).toObject()
-                .value(QStringLiteral("items"))
-                .toArray();
+        const QJsonArray items = event.value(QStringLiteral("result"))
+                                     .toObject()
+                                     .value(QStringLiteral("items"))
+                                     .toArray();
         if (!items.isEmpty())
             m_batchModel->resetFrom(items);
         emit batchFinished(taskId);

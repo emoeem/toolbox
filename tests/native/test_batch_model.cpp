@@ -27,9 +27,8 @@ namespace {
 
 // Entry builders keep the wire shape in one place (same trick as the message
 // builders in test_task_model.cpp).
-QJsonObject entry(const QString &file, const QString &state = {},
-                  int progress = 0, const QString &error = {},
-                  const QString &outputPath = {}) {
+QJsonObject entry(const QString &file, const QString &state = {}, int progress = 0,
+                  const QString &error = {}, const QString &outputPath = {}) {
     QJsonObject object{
         {QStringLiteral("file"), file},
     };
@@ -163,8 +162,7 @@ void TestBatchModel::updateFromAppliesOnlyPresentFields() {
         {QStringLiteral("state"), QStringLiteral("running")},
     });
     QCOMPARE(changed.count(), 1);
-    QCOMPARE(changed.last().at(2).value<QList<int>>(),
-             (QList<int>{BatchModel::BatchStateRole}));
+    QCOMPARE(changed.last().at(2).value<QList<int>>(), (QList<int>{BatchModel::BatchStateRole}));
     QCOMPARE(h.model.index(0, 0).data(BatchModel::BatchStateRole).toString(),
              QStringLiteral("running"));
 
