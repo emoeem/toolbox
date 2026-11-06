@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -94,6 +95,16 @@ class DocumentService : public QObject {
     Q_INVOKABLE void transform(const QString &op, const QJsonObject &params, bool preview = false,
                                int maxSide = -1);
 
+    // filter.preview / filter.apply（async，§3）：整条滤镜链一次提交，steps
+    // 元素为 {filter_key, params, enabled}。preview=true 的完成结果携带
+    // path/sha256（预览文件，§4）且不含 version——只发 previewReady，不改
+    // 版本；preview=false 的完成结果为 {version, width, height}（§3.1：
+    // filter.apply 全分辨率递增 version 并置 modified）——走与 adjust 全分辨率
+    // 相同的版本落定，不发 previewReady（无像素文件）。steps 为空在本地拒绝
+    // （与 openDocument 非 URL 拒绝同一契约：错误 + 恰好一次 actionFailed）。
+    // 由 FilterService 的 previewChain/applyChain 组链调用，QML 也可直用。
+    Q_INVOKABLE void applyFilters(const QJsonArray &steps, bool preview = false, int maxSide = -1);
+
     // image.undo / image.redo / image.reset（async，§3.3）。
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
@@ -131,7 +142,7 @@ class DocumentService : public QObject {
     void onTaskEvent(const QJsonObject &event);
 
   private:
-    enum class PendingKind { Open, Save, Adjust, Transform, Undo, Redo, Reset, History };
+    enum class PendingKind { Open, Save, Adjust, Transform, ApplyFilters, Undo, Redo, Reset, History };
 
     struct Pending {
         PendingKind kind = PendingKind::Open;
@@ -151,7 +162,9 @@ class DocumentService : public QObject {
     static QString taskDisplayName(PendingKind kind, bool preview);
 
     // 动作标识（documentActionFailed 的 action 参数）：协议动作名，预览任务
-    // 带 "-preview" 后缀，供 QML 区分全分辨率提交与预览提交的失败。
+    // 带 "-preview" 后缀，供 QML 区分全分辨率提交与预览提交的失败
+    // （filter 链例外：filter.preview / filter.apply 本身就是不同动作名，
+    // 无需后缀，见 applyFilters）。
     static QString actionId(PendingKind kind, bool preview);
 
     void applyOpened(const QString &path, const QJsonObject &result);

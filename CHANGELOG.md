@@ -1,5 +1,167 @@
 # Changelog
 
+## 2026-11-07 (Phase 6A — 滤镜系统)
+
+依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 6（滤镜系统与创作工作区）
+迁移顺序的第 1-5 项，交付 docs/user-flows.md 流程 2（浏览 → 调参 → 组链 →
+预览 → 应用 → 预设保存/加载）的真实滤镜垂直切片；第 6 项 G'MIC 本批仅交付
+置灰机制（available/optional_deps → 卡片置灰 + 原因 Tooltip），G'MIC 滤镜库
+本体、第 7 项 Batch 与各 Studio 不在本批。状态口径（总纲 §14.2）：本批全部为
+**code_complete / static_reviewed**；Linux 目标环境验收清单见
+`docs/phase6a-acceptance.md`（流程 2 端到端 / G'MIC 类滤镜置灰 / 预览防抖与
+取消，实机项与 CI 已覆盖项分列），未执行任何目标环境运行验证；迁移矩阵
+滤镜/滤镜链/LUT 相关行按其状态取值规则保持 **待迁移**
+（ui-migration-matrix.md 头部与 Phase 6A 进度备注）。
+
+> **CI 覆盖说明**：逻辑层验证已就位，随既有 CI 机制纳入执行——test job 的
+> `unittest discover` 纳入 `tests/test_worker_presets.py`（15 用例：预设四动作
+> 全路径——list 空初始/字段裁剪、save 往返/同名覆盖/非法名/非法 steps、load
+> 往返/缺失/损坏文件/schema_version 超前、delete 往返/缺失/存储层 OSError，
+> 其中 7 个用例为本批覆盖缺口核对后补齐）与既有
+> `tests/test_worker_protocol.py` 的 filter.list/filter.preview/filter.apply
+> 形状与任务路径；native job 的 CTest 新注册 `filter_model`（7 用例）、
+> `filter_chain_model`（10 用例）、`filter_service`（7 用例）三目标。
+> 截至本条目撰写 Phase 6A 改动尚未提交推送，推送后实际运行结果以
+> GitHub Actions 为准；进程、GUI、QML 组件交互与真实预设目录项不在 CI 覆盖
+> 内，必须实机（docs/phase6a-acceptance.md §2-§5）。
+
+### Added（协议与 Worker）
+
+- `docs/ipc-protocol.md`：§3 新增 `filter.presets.list / save / load /
+  delete` 四个 sync 动作行 + §3.4（协议形状与错误码锁定；纯新增，
+  `protocol` 保持 `1`，§8 兼容性规则；`filter.list` 结果行的
+  `category_label` / `preview_supported` / `batch_supported` 字段为既有
+  Worker 形状，本批未改动该行——文档行尚未列全这三个字段，如实维持现状）。
+- `python_worker/adapters/filter_adapter.py`：预设协议化薄封装——复用
+  `processors/filter_presets.py` 既有持久化（路径、原子写、schema_version
+  管理原样，不重写存储逻辑）；`list_presets` 只暴露 {name, step_count}，
+  `save_preset` 经 `FilterStep.from_dict` 逐项校验（有意不做 FilterDef 参数
+  校验：预设允许引用当前环境不可用滤镜，§3.4）、`load_preset` 缺失 →
+  `FILE_NOT_FOUND`、损坏/schema 超前 → `ENGINE_ERROR`、`delete_preset` 缺失
+  如实 `FILE_NOT_FOUND` 不谎报成功。
+- `python_worker/dispatcher.py`：动作表新增四动作（sync 纯接线，模式同
+  image.metadata）；无 task_id、不产生任务行、与文档 version 无关（§3.4）。
+
+### Added（C++ 服务与模型）
+
+- `native/models/filter_model.{h,cpp}`：滤镜目录行模型（key/name/
+  categoryLabel/paramsJson/available/optionalDeps/description 角色，
+  HistoryModel::refreshFrom 同款整表重建模式；available 缺失按不可用处理——
+  宁可置灰，不谎称可用；search 对名称与关键词做大小写不敏感包含匹配）。
+- `native/models/filter_chain_model.{h,cpp}`：滤镜链行模型，行数据与协议
+  steps 元素一一对应（{filter_key, params, enabled}，enabled 缺省 true）；
+  编辑入口 replaceFrom/addStep/removeRow/moveUp/moveDown/setEnabled（越界
+  静默、同值写入不发射 dataChanged——TaskModel::updateRow 同款防抖纪律），
+  stepCount 仅在行数变化时通知。
+- `native/services/filter_service.{h,cpp}`：滤镜页 facade（QML 单例，持有
+  filterModel/chainModel）：loadFilters（loadingFilters 生命周期）、预设四
+  动作 fire-and-forget（presetsList 缓存 + presetsChanged / presetSaved /
+  presetLoaded 经 replaceFrom 写入链模型 / presetDeleted）、previewChain/
+  applyChain 委托 `DocumentService::applyFilters`（组包 currentChainSteps 按
+  链顺序序列化；QML 不 sendAction）。关联模式与 DocumentService 同款
+  tracked dispatch，未跟踪帧（image.* 与 filter.preview/apply 的异步受理）
+  一律不认领；未绑定后端如实 `filterError(INTERNAL)`，不伪造受理。
+- `native/core/document_service.{h,cpp}`：新增 `applyFilters(steps, preview,
+  maxSide)`——filter.preview / filter.apply 整链一次提交；空链/无文档本地
+  拒绝（错误 + 恰好一次 documentActionFailed，QML 在途门控契约）；预览完成
+  只发 previewReady 不改版本（§3.1），全分辨率完成 version+1 置 modified；
+  任务行显示名"滤镜链"（预览/应用不分列，提交形态由 actionId 区分）。
+- `CMakeLists.txt`：编入 filter_model / filter_chain_model / filter_service
+  源文件与四个 AppFilter* QML 文件。
+
+### Added（QML 滤镜页签，流程 2）
+
+- `ui/components/AppFilterCard.qml`：滤镜卡片（名称/分类/可用性）；
+  available=false 置灰（40% 口径、光标禁用、点击与 Space/Enter/Return 均
+  无效）+ Tooltip 原因（optional_deps，如"缺少可选依赖：gmic"；依赖缺失
+  兜底文案不点名具体依赖）；可用卡片 Tooltip 展示描述；选中态 accent 描边；
+  基类有意选 Item 而非 AbstractButton（避免无参 clicked() 遮蔽带参信号）。
+- `ui/components/AppFilterParameterGroup.qml`：FilterDef 参数定义 JSON →
+  控件自动生成（float→AppSliderField、int→AppNumberField、bool→
+  AppToggleField、enum→AppSelectField、color→AppColorField、string→
+  AppTextField）；currentParams() 返回全部已声明参数（未改键取 default，
+  "整表发送、Worker 兜底合并"）；畸形 JSON 清空面板不抛错；未知类型不进
+  values（交 Worker 默认值）。
+- `ui/components/AppFilterChainItem.qml`：链步骤行——启用开关（AppToggleField
+  整行）、滤镜显示名（宿主传 key→名映射，未传如实显示 key）、参数摘要
+  （空 params 显示"默认参数"）、上移/下移/删除；行内直调模型编辑入口 +
+  clickedRow 信号双通道；拖拽排序未实现（↑/↓ 代替，已知限制）。
+- `ui/components/AppFilterInspector.qml`：滤镜页签整体——搜索 + 卡片网格
+  （FilterModel.search）→ 选中卡片 → 参数面板 + 加入链 → 链列表 → 预设行
+  （保存/加载/删除，防自激闸门：presetsChanged 经 0ms Timer 延迟重读）→
+  预览/应用按钮只发信号（防抖与在途门控归宿主页面）；链的任何变化经模型
+  信号汇成 chainChanged()。
+- `ui/pages/EditorPage.qml`：检查器增"滤镜"页签（ui-page-spec §2 页签：
+  调整|滤镜）；链变化与 [预览] 按钮共用 300ms 防抖（filterPreviewDebounce），
+  出口统一做空链/无文档/未就绪门检（换文档自动清链不弹错误 Toast）；应用链
+  后链清空（与调整页签"应用后滑杆回中性"同一纪律，防已烘焙结果二次叠加）；
+  fullResInFlight 在途门控扩展到 filter.apply（documentActionFailed 白名单
+  只加 filter.apply——filter.preview 有意不进白名单：预览失败不触碰历史栈，
+  提前解锁会重开竞态窗口，见 EditorPage.qml onDocumentActionFailed 注释与
+  filter_service.h 的门控通道说明；preview/apply 本就是不同动作名，无
+  "-preview" 后缀，见 document_service.cpp actionId()）；换文档时链
+  replaceFrom([]) 作废待提交管线；FilterService.bindBackend
+  与滤镜目录/预设缓存的就绪兜底补拉（onRunningChanged / onBackendReady）；
+  FilterService 信号 → Toast 呈现。
+
+### Added（测试）
+
+- `tests/test_worker_presets.py`（新文件，15 用例，进程内 Dispatcher +
+  TaskRuntime，存储重定向临时目录）：预设四动作全路径——list 空初始与
+  {name, step_count} 字段裁剪、save 往返（enabled 缺省 true）/ 同名覆盖 /
+  非字符串名 / 空白名 / 非法 steps（非数组 / 缺 filter_key / 元素非对象 /
+  params 形状非法）、load 往返（FilterStep 字段一致）/ 缺失
+  `FILE_NOT_FOUND` / 损坏文件与 schema_version 超前 `ENGINE_ERROR`、delete
+  往返递减 / 缺失 `FILE_NOT_FOUND` / 存储层 OSError `ENGINE_ERROR`；其中
+  7 个用例为本批覆盖缺口核对后补齐（非字符串名、同名覆盖、元素非对象、
+  load/delete 非法名、损坏文件、schema 超前、存储 OSError）。
+- `tests/native/test_filter_model.cpp`（新文件，7 用例，
+  QAbstractItemModelTester）：角色名锁定、filter.list 协议形状解析（缺失
+  available 按不可用）、整表重建、缺 key 条目跳过、搜索标题+关键词、大小写
+  不敏感与空查询、越界 data（负行/越界行/带父索引的查询回答无效值不崩溃，
+  TaskModel 同款扁平表契约）。
+- `tests/native/test_filter_chain_model.cpp`（新文件，10 用例）：角色名锁定、
+  replaceFrom（缺 key 跳过 / enabled 缺省 / 行数通知）、addStep 空 key 忽略、
+  removeRow 越界静默、moveUp/moveDown 边界拒绝、移动后 chainIndex 刷新、
+  setEnabled 同值防抖。
+- `tests/native/test_filter_service.cpp`（新文件，7 用例，信号模拟不启动
+  Worker，合成响应帧）：默认态与未绑定后端如实报错零上送、filter.list 填充
+  模型与 loadingFilters 生命周期（失败响应收标志）、预设本地拒绝与四动作
+  关联往返（真实预设存储往返由 tests/test_worker_presets.py 的临时目录重定向
+  锁定）、空链/无文档委托拒绝、previewChain/applyChain →
+  DocumentService.applyFilters → TaskModel 任务行 → §3.1 版本落定。
+- `tests/native/CMakeLists.txt`：注册 `filter_model` / `filter_chain_model` /
+  `filter_service` 三个 CTest 目标。
+
+### Added（文档）
+
+- `docs/phase6a-acceptance.md`：Linux 目标环境验收清单，明确"CI 已覆盖（§1）
+  与必须实机（§2-§5）"的分工：流程 2 端到端（浏览/调参/入链/预览/应用/
+  撤销/预设保存加载删除/持久化/错误降级/任务行）、G'MIC 类滤镜置灰（机制
+  实机演练 + 现注册表无 optional_deps 声明的如实边界）、预览防抖与取消
+  （防抖合并/时序、行内取消、同文档旧预览覆盖竞态的如实验收）、大图与
+  在途门控。
+
+### 已知限制（如实记录）
+
+- AppFilterParameterGroup 参数类型与 ui-component-spec §3 偏差：规格写
+  {float,int,bool,enum,color,point}，实现为 {float,int,bool,enum,color,string}
+  ——无 point（当前注册表也无 point 参数），string 为实现补充；规格修订
+  留待后续批次（docs/phase6a-acceptance.md §6）。
+- 预览缓存未实现：流程 2"缓存 key = 链参数指纹"——Worker 返回 `fingerprint`
+  字段但 UI 每次链变化都发新请求，无指纹命中；既有 PreviewCache 未接入
+  Worker 管线（功能缺口，非缺陷）。
+- 同文档旧预览覆盖竞态：旧预览任务完成可能覆盖新预览（previewReady 无版本
+  序丢弃，filter.preview result 不含 version）；验收按 docs/
+  phase6a-acceptance.md §4 如实复现或证伪后回填。
+- AppFilterChainItem 拖拽排序未实现（↑/↓ 按钮代替，规格标注 Phase 6）。
+- Esc 取消在途预览未实现（同 Phase 5 已知限制，取消入口只有任务抽屉行内
+  按钮）。
+- G'MIC 滤镜库本体未迁移（矩阵 §2 收敛到 backends/）；FilterDefRegistry
+  现无 optional_deps 声明——标准环境下滤镜目录无现成置灰卡片，置灰机制以
+  CI 合成条目 + 实机演练（临时声明，不提交）为证据。
+- 检查器页签内无独立"缓存/指纹"指示（与预览缓存缺口一致）。
+
 ## 2026-11-06 (Phase 5 — 核心图像编辑工作流)
 
 依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 5（核心图像编辑工作流，

@@ -6,7 +6,10 @@ import QtQuick.Layouts
 // Editor workspace (Phase 5): the real single-image workflow of
 // docs/user-flows.md 流程 1 over DocumentService — open → adjust (debounced
 // preview) → apply → transform → undo/redo/reset → save, per
-// docs/ui-page-spec.md §2.
+// docs/ui-page-spec.md §2. The inspector is tabbed (调整 / 滤镜,
+// ui-page-spec §2: 页签:调整|滤镜); the 滤镜 tab implements
+// docs/user-flows.md 流程 2 over FilterService (catalog → params → chain →
+// presets → preview/apply), reusing the same canvas refresh paths.
 //
 // Rules kept verbatim (总纲 §9: UI 主线程零像素计算):
 // - QML does no pixel math; every long-running image operation is an async
@@ -23,15 +26,23 @@ import QtQuick.Layouts
 //   ImageCanvas::setSource early-returns on an equal URL — so the URL carries
 //   an incrementing ?v= query as a reload trigger; QUrl::toLocalFile() strips
 //   the query and decodes back to the exact file path.
-// - Apply/transform full-resolution results carry no pixel path (§3.2), so
-//   the post-completion canvas refresh requests one preview of the *current*
-//   pixels via a fully-neutral adjustments object: the Worker skips
+// - Filter chain previews (流程 2) ride the identical channel: chain/param
+//   changes → 300ms debounce → FilterService.previewChain(768)（组包在
+//   FilterService，经 DocumentService::applyFilters 提交）→ 完成结果携带
+//   preview 文件路径（§3.1 filter.preview 不递增 version）→ previewReady →
+//   同一画布刷新。[预览] 按钮也走同一防抖出口（两次快速点击只发一次）。
+// - Apply/transform/filter-apply full-resolution results carry no pixel path
+//   (§3.2), so the post-completion canvas refresh requests one preview of the
+//   *current* pixels via a fully-neutral adjustments object: the Worker skips
 //   near-default keys (python_worker/adapters/image_adapter.py adjust_chain)
 //   and renders the document as-is. undo/redo/reset deliver their restored
 //   canvas file through DocumentService.previewReady themselves (§3.3).
 // - Applied adjustments bake into the document: after a full-resolution apply
 //   the sliders return to neutral (the "已应用状态" baseline of ui-page-spec
 //   §2), so the next preview/apply cannot double-apply on top of the result.
+//   The filter chain follows the same discipline: after filter.apply the
+//   chain is cleared — a surviving chain would re-apply itself on top of the
+//   baked result on the next preview/apply.
 Page {
     id: page
 
@@ -50,9 +61,10 @@ Page {
 
     property int previewSeq: 0                  // ?v= 递增序号：同路径预览强制重载
     property bool openPending: false            // image.open 在途（同步响应未回）
-    property bool fullResInFlight: false        // apply/transform 任务在途
+    property bool fullResInFlight: false        // apply/transform/链应用 任务在途
     property bool applyRequested: false         // 本次 version 变更来自"应用"
     property bool transformRequested: false     // 本次 version 变更来自"变换"
+    property bool filterApplyRequested: false   // 本次 version 变更来自"滤镜链应用"（流程 2）
     property bool suppressPreview: false        // 程序化写滑杆值时抑制预览请求
 
     // 与 Worker 的 no-op 阈值一致（adjust_chain 跳过 |Δ| ≤ 1e-6 的键）。
@@ -70,6 +82,16 @@ Page {
         // 行内取消才对编辑动作生效。两个绑定都幂等，重复调用无害。
         DocumentService.bindBackend(Application.backend)
         DocumentService.bindTaskModel(Application.taskModel)
+        // 滤镜页签接线（filter_service.h 同款约定）：bindBackend 接响应帧；
+        // 页面打开时拉一次滤镜目录（流程 2 数据源）与预设缓存。Worker 未就绪
+        // 时两者都跳过——未绑定的请求只会发 filterError(INTERNAL)（无意义
+        // Toast），就绪兜底见 Application.backend Connections 的
+        // onRunningChanged 与 AppFilterInspector 的 onBackendReadyChanged。
+        FilterService.bindBackend(Application.backend)
+        if (page.backendReady) {
+            FilterService.loadFilters()
+            filterInspector.pullPresets()
+        }
     }
 
     // ---- helpers ------------------------------------------------------------
@@ -197,6 +219,29 @@ Page {
         page.applyRequested = true;
         page.fullResInFlight = true;
         DocumentService.adjust(page.collectAdjustments(), false, 0);
+    }
+
+    // ---- 流程 2：滤镜链（docs/user-flows.md 流程 2）---------------------------
+    // 链预览：链/参数变化与 [预览] 按钮共用同一 300ms 防抖（filterPreviewDebounce
+    //），出口统一在此：空链/无文档/未就绪静默跳过——空链提交会被
+    // DocumentService::applyFilters 本地拒绝（INVALID_PARAMS + actionFailed），
+    // 弹错误 Toast 纯属噪音（文档切换后的自动清链也会短暂经过这里）。
+    function requestChainPreview() {
+        if (!page.hasDocument || !page.backendReady
+                || FilterService.chainModel.stepCount === 0)
+            return;
+        FilterService.previewChain(768);
+    }
+
+    function applyFilterChain() {
+        if (!page.hasDocument || !page.ensureBackendReady()
+                || FilterService.chainModel.stepCount === 0 || page.fullResInFlight)
+            return;
+        page.filterApplyRequested = true;
+        page.fullResInFlight = true;
+        // 组包与提交都在 FilterService（currentChainSteps → DocumentService::
+        // applyFilters 全分辨率，§3.1 version+1 / modified）；QML 不 sendAction。
+        FilterService.applyChain()
     }
 
     function runTransform(op, params) {
@@ -434,7 +479,8 @@ Page {
 
             Layout.fillHeight: true
             visible: page.hasDocument   // 空态：检查器隐藏（ui-page-spec §2）
-            tabs: [{ id: "adjust", title: qsTr("调整") }]
+            tabs: [{ id: "adjust", title: qsTr("调整") },
+                   { id: "filters", title: qsTr("滤镜") }]
             currentIndex: 0
 
             // Worker 不可用的降级横幅（ui-page-spec §2）：画布仍可查看。
@@ -460,128 +506,157 @@ Page {
                 }
             }
 
+            // AppInspectorPanel 的默认槽是各页签共用的一条滚动 Column，不随
+            // currentIndex 切换内容——页签内容各自带 visible 开关（隐藏项不占
+            // 布局，Column 会跳过不可见子项）。
+            //
             // 调整页签（ui-page-spec §2）：滑杆 + 数值输入双向绑定；
             // 中性默认值与 Worker _ADJUST_STEPS 一致（gamma 1.0，其余 0.0）。
-            AppSliderField {
-                id: brightnessSlider
+            Column {
+                id: adjustContent
+                visible: inspector.currentTabId === "adjust"
                 width: parent.width
-                label: qsTr("亮度")
-                from: -1; to: 1; step: 0.05; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();   // 松手立即发一次 max 768 预览
+                spacing: Theme.spacingMd
+
+                AppSliderField {
+                    id: brightnessSlider
+                    width: parent.width
+                    label: qsTr("亮度")
+                    from: -1; to: 1; step: 0.05; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();   // 松手立即发一次 max 768 预览
+                    }
                 }
-            }
-            AppSliderField {
-                id: contrastSlider
-                width: parent.width
-                label: qsTr("对比度")
-                from: -1; to: 1; step: 0.05; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: contrastSlider
+                    width: parent.width
+                    label: qsTr("对比度")
+                    from: -1; to: 1; step: 0.05; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
                 }
-            }
-            AppSliderField {
-                id: saturationSlider
-                width: parent.width
-                label: qsTr("饱和度")
-                from: 0; to: 3; step: 0.05; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: saturationSlider
+                    width: parent.width
+                    label: qsTr("饱和度")
+                    from: 0; to: 3; step: 0.05; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
                 }
-            }
-            AppSliderField {
-                id: gammaSlider
-                width: parent.width
-                label: qsTr("伽马")
-                // value 必须与 defaultValue 一并落在中性 1.0：组件默认 value 是 0，
-                // 而 gamma=0 会被 Worker 钳到 0.01（近乎全黑）。
-                from: 0.1; to: 3; step: 0.05; value: 1; defaultValue: 1
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: gammaSlider
+                    width: parent.width
+                    label: qsTr("伽马")
+                    // value 必须与 defaultValue 一并落在中性 1.0：组件默认 value 是 0，
+                    // 而 gamma=0 会被 Worker 钳到 0.01（近乎全黑）。
+                    from: 0.1; to: 3; step: 0.05; value: 1; defaultValue: 1
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
                 }
-            }
-            AppSliderField {
-                id: exposureSlider
-                width: parent.width
-                label: qsTr("曝光")
-                from: -3; to: 3; step: 0.1; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: exposureSlider
+                    width: parent.width
+                    label: qsTr("曝光")
+                    from: -3; to: 3; step: 0.1; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
                 }
-            }
-            AppSliderField {
-                id: hueSlider
-                width: parent.width
-                label: qsTr("色相")
-                suffix: "°"
-                from: -180; to: 180; step: 1; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: hueSlider
+                    width: parent.width
+                    label: qsTr("色相")
+                    suffix: "°"
+                    from: -180; to: 180; step: 1; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
                 }
-            }
-            AppSliderField {
-                id: vibranceSlider
-                width: parent.width
-                label: qsTr("自然饱和度")
-                from: -1; to: 1; step: 0.05; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: vibranceSlider
+                    width: parent.width
+                    label: qsTr("自然饱和度")
+                    from: -1; to: 1; step: 0.05; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
                 }
-            }
-            AppSliderField {
-                id: highlightsSlider
-                width: parent.width
-                label: qsTr("高光")
-                from: -1; to: 1; step: 0.05; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: highlightsSlider
+                    width: parent.width
+                    label: qsTr("高光")
+                    from: -1; to: 1; step: 0.05; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
                 }
-            }
-            AppSliderField {
-                id: shadowsSlider
-                width: parent.width
-                label: qsTr("阴影")
-                from: -1; to: 1; step: 0.05; defaultValue: 0
-                onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
-                onValueModified: previewDebounce.restart()
-                onDragFinished: {
-                    previewDebounce.stop();
-                    page.requestPreview();
+                AppSliderField {
+                    id: shadowsSlider
+                    width: parent.width
+                    label: qsTr("阴影")
+                    from: -1; to: 1; step: 0.05; defaultValue: 0
+                    onValueChanged: if (!page.suppressPreview) previewDebounce.restart()
+                    onValueModified: previewDebounce.restart()
+                    onDragFinished: {
+                        previewDebounce.stop();
+                        page.requestPreview();
+                    }
+                }
+
+                AppButton {
+                    id: applyButton
+                    width: parent.width
+                    kind: AppButton.Kind.Primary
+                    text: qsTr("应用")
+                    enabled: page.hasDocument && page.adjustmentsDirty && !page.fullResInFlight
+                    loading: page.fullResInFlight && page.applyRequested
+                    onClicked: page.applyAdjustments()
                 }
             }
 
-            AppButton {
-                id: applyButton
+            // 滤镜页签（docs/user-flows.md 流程 2）：搜索 / FilterCard 网格 /
+            // 参数面板 / 链列表 / 预设行。组件只读写 FilterService 的模型与预设
+            // API 并发信号——防抖、在途门控与服务提交都归页面
+            // （requestChainPreview / applyFilterChain），画布刷新复用
+            // previewReady / documentVersionChanged 既有路径。
+            AppFilterInspector {
+                id: filterInspector
+
+                visible: inspector.currentTabId === "filters"
                 width: parent.width
-                kind: AppButton.Kind.Primary
-                text: qsTr("应用")
-                enabled: page.hasDocument && page.adjustmentsDirty && !page.fullResInFlight
-                loading: page.fullResInFlight && page.applyRequested
-                onClicked: page.applyAdjustments()
+                backendReady: page.backendReady
+                fullResInFlight: page.fullResInFlight
+                applyInFlight: page.filterApplyRequested && page.fullResInFlight
+                onPreviewRequested: filterPreviewDebounce.restart()
+                onChainChanged: filterPreviewDebounce.restart()
+                onApplyRequested: page.applyFilterChain()
             }
         }
     }
@@ -721,6 +796,11 @@ Page {
             page.fullResInFlight = false;
             page.applyRequested = false;
             page.transformRequested = false;
+            page.filterApplyRequested = false;
+            // 滤镜链是"待提交管线"，随文档切换作废（旧链预览不能打在新文档
+            // 上）。replaceFrom([]) → modelReset → AppFilterInspector 汇成
+            // chainChanged → 防抖出口被空链门挡下，不产生预览请求。
+            FilterService.chainModel.replaceFrom([]);
             // 画布保持本地文件 URL（openFile 已设置）→ 快速显示，不换源；
             // 新文档从中性滑杆开始（进入文档的调整基线）。
             page.resetAdjustSliders();
@@ -749,6 +829,16 @@ Page {
                 page.transformRequested = false;
                 page.fullResInFlight = false;
                 page.requestDocumentRefresh();
+            } else if (page.filterApplyRequested) {
+                page.filterApplyRequested = false;
+                page.fullResInFlight = false;
+                // 已应用的链进入文档（§3.1：filter.apply version+1 / modified）。
+                // 链随之清空：残留链会在下一次预览/应用时把同一链再叠加一遍——
+                // 与调整页签"应用后滑杆回中性"同一纪律。清链的 modelReset 汇成
+                // chainChanged，防抖出口被空链门挡下；画布取回最新像素走下面的
+                // requestDocumentRefresh（与调整/变换同一刷新路径）。
+                FilterService.chainModel.replaceFrom([]);
+                page.requestDocumentRefresh();
             }
             // undo/redo/reset：画布刷新文件由 DocumentService 经 previewReady 交付（§3.3）。
         }
@@ -766,9 +856,12 @@ Page {
             // 门控——应用在途时一次无关的预览失败会提前解锁保存/撤销，重新
             // 打开门控要阻止的历史栈竞态窗口；状态机迁移走 onDocumentActionFailed。
             if (page.openPending) {
-                // 打开失败 → 空态 + Toast（ui-page-spec §2 错误态）。
+                // 打开失败 → Toast（ui-page-spec §2 错误态）。文档未切换成功，
+                // openedDocumentId 保留原值：在途的全分辨率任务仍属于原文档，
+                // onDocumentActionFailed 以 documentId === openedDocumentId 判定
+                // 相关性——置空会让"打开失败 + 原文档任务失败"的双失败场景在
+                // 在途门控上永久卡死（fullResInFlight 失去唯一解除路径）。
                 page.openPending = false;
-                page.openedDocumentId = "";
                 if (page.hasDocument)
                     page.requestDocumentRefresh();  // 已有文档：取回其当前像素
                 else
@@ -780,17 +873,22 @@ Page {
         }
 
         function onDocumentActionFailed(documentId, action) {
-            // 只解除"当前文档的全分辨率 adjust/transform 未落定"：
+            // 只解除"当前文档的全分辨率提交未落定"：
             // - documentId 区分换文档后的旧文档失败（新文档的在途提交不受影响）；
-            // - action 不含 "-preview" 后缀，区分同文档的预览任务失败（预览
-            //   不触碰历史栈，提前解锁会重开竞态窗口）。fullResInFlight 只由
-            //   apply/transform 置位且按钮在途时禁用，故这两个标签的错误必属
-            //   在途提交本身。
+            // - action 白名单区分同文档的预览任务失败（预览不触碰历史栈，提前
+            //   解锁会重开竞态窗口）：image.adjust / image.transform 是全分辨率
+            //   提交，filter.apply 是流程 2 的全分辨率链应用（filter.preview /
+            //   filter.apply 本身就是不同动作名，无 "-preview" 后缀，见
+            //   document_service.cpp actionId()）。fullResInFlight 只由
+            //   apply/transform/applyFilterChain 置位且按钮在途时禁用，故这些
+            //   标签的错误必属在途提交本身。
             if (page.fullResInFlight && documentId === page.openedDocumentId
-                    && (action === "image.adjust" || action === "image.transform")) {
+                    && (action === "image.adjust" || action === "image.transform"
+                        || action === "filter.apply")) {
                 page.fullResInFlight = false;
                 page.applyRequested = false;
                 page.transformRequested = false;
+                page.filterApplyRequested = false;
             }
         }
 
@@ -809,7 +907,41 @@ Page {
             page.fullResInFlight = false;
             page.applyRequested = false;
             page.transformRequested = false;
+            page.filterApplyRequested = false;
             page.showToast(code + " · " + message, AppToast.Type.Error);
+        }
+
+        function onRunningChanged() {
+            // Worker 就绪后补拉一次滤镜目录（流程 2 数据源）：页面打开时若
+            // Worker 未就绪，首轮 loadFilters 被跳过（未绑定后端只会发无意义
+            // 的 filterError(INTERNAL)）。条件收敛：在途/已加载不重发（幂等）。
+            if (Application.backend.running && !FilterService.loadingFilters
+                    && FilterService.filterModel.rowCount() === 0)
+                FilterService.loadFilters();
+        }
+    }
+
+    // FilterService 信号 → 用户呈现（Toast）。预设 API 的同步错误经
+    // filterError（filter_service.h），预览/应用失败另有 DocumentService 的
+    // documentError / documentActionFailed 通道（上方已接）。
+    Connections {
+        target: FilterService
+
+        function onFilterError(code, message) {
+            page.showToast(code + " · " + message, AppToast.Type.Error);
+        }
+
+        function onPresetSaved(name) {
+            page.showToast(qsTr("预设已保存：%1").arg(name), AppToast.Type.Success);
+        }
+
+        function onPresetLoaded(steps) {
+            page.showToast(qsTr("预设已载入（%1 步，链已替换）").arg(steps.length),
+                           AppToast.Type.Success);
+        }
+
+        function onPresetDeleted(name) {
+            page.showToast(qsTr("预设已删除：%1").arg(name), AppToast.Type.Success);
         }
     }
 
@@ -846,5 +978,16 @@ Page {
         id: previewDebounce
         interval: 300
         onTriggered: page.requestPreview()
+    }
+
+    // ---- 滤镜链预览防抖（流程 2）--------------------------------------------
+    // 链变化（加入/删除/排序/启停/载入预设，AppFilterInspector.chainChanged）与
+    // [预览] 按钮共用同一 300ms 防抖 → previewChain(768)（与调整页签同一
+    // max_side 口径）；完成结果经 DocumentService.previewReady 走同一画布刷新。
+    // 连续变化只发一次（防抖出口 requestChainPreview 内再做空链/就绪门检）。
+    Timer {
+        id: filterPreviewDebounce
+        interval: 300
+        onTriggered: page.requestChainPreview()
     }
 }

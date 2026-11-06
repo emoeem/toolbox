@@ -43,6 +43,10 @@ class Dispatcher:
             'image.metadata': self._image_metadata,
             'image.history': self._image_history,
             'filter.list': self._filter_list,
+            'filter.presets.list': self._filter_presets_list,
+            'filter.presets.save': self._filter_presets_save,
+            'filter.presets.load': self._filter_presets_load,
+            'filter.presets.delete': self._filter_presets_delete,
             'task.cancel': self._task_cancel,
             'task.query': self._task_query,
         }
@@ -163,6 +167,20 @@ class Dispatcher:
 
     def _filter_list(self, _params: dict) -> dict[str, Any]:
         return {'filters': filter_adapter.list_filters()}
+
+    # 预设四动作均为纯 sync（docs/ipc-protocol.md §3.4）：参数校验与错误码
+    # 归一在 filter_adapter，本层只做接线（模式同 image.metadata）。
+    def _filter_presets_list(self, _params: dict) -> dict[str, Any]:
+        return {'presets': filter_adapter.list_presets()}
+
+    def _filter_presets_save(self, params: dict) -> dict[str, Any]:
+        return filter_adapter.save_preset(params.get('name'), params.get('steps'))
+
+    def _filter_presets_load(self, params: dict) -> dict[str, Any]:
+        return filter_adapter.load_preset(params.get('name'))
+
+    def _filter_presets_delete(self, params: dict) -> dict[str, Any]:
+        return filter_adapter.delete_preset(params.get('name'))
 
     def _task_cancel(self, params: dict) -> dict[str, Any]:
         result = self.ctx.ensure_runtime().cancel(_require(params, 'task_id'))

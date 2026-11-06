@@ -124,6 +124,10 @@ Worker 启动参数：
 | `image.metadata` | sync | `{document_id}` | `{width, height, format, mode, source, modified}` |
 | `image.save` | async | `{document_id, path, quality?}` | `{saved: true, path, file_size}` |
 | `filter.list` | sync | `{}` | `{filters: [{key, name, category, params, available, optional_deps, description}]}` |
+| `filter.presets.list` | sync | `{}` | `{presets: [{name, step_count}]}`（§3.4） |
+| `filter.presets.save` | sync | `{name, steps: [{filter_key, params, enabled}]}` | `{saved: true, name}`（steps 逐项经 `FilterStep.from_dict` 校验，非法 → `INVALID_PARAMS`，§3.4） |
+| `filter.presets.load` | sync | `{name}` | `{name, steps: [{filter_key, params, enabled}]}`（预设不存在 → `FILE_NOT_FOUND`，§3.4） |
+| `filter.presets.delete` | sync | `{name}` | `{deleted: true}`（预设不存在 → `FILE_NOT_FOUND`，§3.4） |
 | `filter.preview` | async | `{document_id, filters: [{filter_key, params, enabled}], max_side?}` | `{path, width, height, sha256, preview_of}` |
 | `filter.apply` | async | `{document_id, filters: [...]}` | `{width, height, version}`（文档像素被更新，`modified=true`；`version` 规则见 §3.1） |
 | `image.adjust` | async | `{document_id, adjustments: {brightness?, contrast?, saturation?, gamma?, exposure?, hue?, vibrance?, highlights?, shadows?}, preview, max_side?}` | `{version, width, height, path?, sha256?}`（§3.2；`preview=true` 时含 `path/sha256`） |
@@ -139,6 +143,17 @@ Worker 启动参数：
 
 本轮增补为**纯新增动作 + `filter.apply` 结果新增 `version` 字段**：不删除字段、
 不改既有字段语义，`protocol` 保持 `1`（符合 §8 兼容性规则）。
+
+Phase 5（分支 `phase5-core-editing`）再增补：§3.4 新增 `filter.presets.list /
+save / load / delete` 四个 sync 动作。同样为纯新增动作，不改动既有动作，
+`protocol` 保持 `1`；Worker（Python）侧实现于
+`python_worker/adapters/filter_adapter.py`（预设封装，复用
+`processors/filter_presets.py` 既有持久化）与 `python_worker/dispatcher.py`
+（动作表），测试锁为 `tests/test_worker_presets.py`。C++/QML 侧消费随滤镜链
+页面接线交付（ui-component-spec.md §3：AppFilterChainItem 为 Phase 6 交付；
+2026-11-07 本批已随滤镜页签接线交付该消费侧——FilterModel / FilterService 与
+AppFilterCard / AppFilterParameterGroup / AppFilterChainItem /
+AppFilterInspector，批次口径见 CHANGELOG 同日 Phase 6A 条目）。
 
 ### 3.1 文档版本（document version）
 
@@ -219,6 +234,40 @@ Worker 启动参数：
 - `image.history`（sync）：返回 `{entries: [{index, name}], current, canUndo,
   canRedo}`，`index` 即 `entries` 下标。C++ 端以此驱动 HistoryModel 与
   撤销/重做按钮启停（ui-page-spec.md §2）。
+
+### 3.4 滤镜链预设（filter.presets.*，Phase 5 增补）
+
+四个 sync 动作，为 `processors/filter_presets.py` 既有持久化的协议化薄封装；
+存储语义（路径、文件格式、原子写）由该模块定义，本节只锁定协议形状与
+错误码。对应流程：user-flows.md 流程 2 的"预设"节点。
+
+- 持久化沿用既有资产：文件为 `~/.toolbox/filter_presets/*.filterchain.json`
+  （可被 Settings `presets/filter_chain_dir` 覆盖），写入为临时文件 +
+  原子 rename，`schema_version` 由存储层维护——协议层不暴露文件路径与
+  schema 细节。
+- `filter.presets.list`（sync）`{}` → `{presets: [{name, step_count}]}`，
+  按存储文件名（净化后的 name）排序——存储层行为；`step_count` 为链内
+  步骤数（含 disabled）。只暴露这两个字段，文件路径/时间戳等存储细节
+  不进协议。
+- `filter.presets.save`（sync）`{name, steps}` → `{saved: true, name}`：
+  - `name` 必须为非空字符串；`steps` 逐项经 `FilterStep.from_dict` 校验
+    （非对象、缺 `filter_key`、形状非法 → `INVALID_PARAMS`，提交前同步
+    返回，错误消息带出错下标，与 `filter.preview` 的链校验一致）。
+  - 有意**不做** FilterDef 参数校验：预设是持久化用户状态，允许保存引用
+    当前环境不可用滤镜（如缺 G'MIC 依赖）的链；参数合法性沿用 apply 路径
+    的 `FilterChain.validate_all` 检查。
+  - 同名预设直接覆盖（存储层 `overwrite=True` 语义），不返回
+    FileExists 类错误。
+- `filter.presets.load`（sync）`{name}` → `{name, steps: [{filter_key,
+  params, enabled}]}`。预设不存在 → `FILE_NOT_FOUND`（提交前同步返回）；
+  文件损坏或 `schema_version` 高于当前支持 → `ENGINE_ERROR`（内容问题，
+  非请求参数问题）。`steps` 形状与 `filter.preview` / `filter.apply` 的
+  `filters` 参数一致，可直接回填链编辑器。
+- `filter.presets.delete`（sync）`{name}` → `{deleted: true}`；预设不存在
+  → `FILE_NOT_FOUND`——列表与存储之间的陈旧状态如实上报，不谎报删除
+  成功。
+- 预设与文档无关：四个动作均不接受/返回 `document_id`，不触碰 §3.1 的
+  `version`，不产生任务（无 task_id、无 task.* 事件）。
 
 ## 4. 大图数据传递（总纲 §6.3）
 

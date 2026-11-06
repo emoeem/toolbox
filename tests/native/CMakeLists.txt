@@ -120,3 +120,61 @@ target_sources(test_document_service PRIVATE
 target_include_directories(test_document_service PRIVATE
     ${CMAKE_SOURCE_DIR}/native
 )
+
+# FilterModel / FilterChainModel：纯数据模型（不连 BackendManager），填充经
+# Q_INVOKABLE（reloadFrom / replaceFrom），测试直接构造即可；QAbstractItemModelTester
+# 需 Qt6::Test，QML_ELEMENT 元类型需 Qt6::Qml。
+qt_add_executable(test_filter_model test_filter_model.cpp)
+target_link_libraries(test_filter_model PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME filter_model COMMAND test_filter_model)
+target_sources(test_filter_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/models/filter_model.cpp
+)
+target_include_directories(test_filter_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)
+
+qt_add_executable(test_filter_chain_model test_filter_chain_model.cpp)
+target_link_libraries(test_filter_chain_model PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME filter_chain_model COMMAND test_filter_chain_model)
+target_sources(test_filter_chain_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/models/filter_chain_model.cpp
+)
+target_include_directories(test_filter_chain_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)
+
+# FilterService：消费 BackendManager 信号（测试直接发射，同 test_task_model
+# 模式），previewChain/applyChain 委托 DocumentService::instance()（其 applyFilters
+# 走 tracked dispatch 并登记 TaskModel 行、openDocument 写 SettingsService 最近
+# 文件），故 core/、models/（filter 两模型 + task_model）、services/ 与 backend/
+# 源一并编入。两处服务源码均用 QML 单例工厂，故需 Qt6::Qml。
+qt_add_executable(test_filter_service test_filter_service.cpp)
+target_link_libraries(test_filter_service PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME filter_service COMMAND test_filter_service)
+target_sources(test_filter_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/services/filter_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/core/document_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/filter_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/filter_chain_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/task_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/services/settings_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/python_worker.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/ipc_protocol.cpp
+)
+target_include_directories(test_filter_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)

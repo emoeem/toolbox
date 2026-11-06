@@ -22,11 +22,19 @@ qt_add_executable(toolbox
     native/models/tool_model.cpp
     native/models/task_model.h
     native/models/task_model.cpp
+    # Phase 5: 滤镜目录与滤镜链模型
+    native/models/filter_model.h
+    native/models/filter_model.cpp
+    native/models/filter_chain_model.h
+    native/models/filter_chain_model.cpp
     # Phase 4: 设置/字体服务与 Worker 任务行模型
     native/services/settings_service.h
     native/services/settings_service.cpp
     native/services/font_service.h
     native/services/font_service.cpp
+    # Phase 5: 滤镜页服务（目录/链/预设 facade）
+    native/services/filter_service.h
+    native/services/filter_service.cpp
     # Phase 4: 文档服务（编辑器状态 facade）与撤销历史模型
     native/core/document_service.h
     native/core/document_service.cpp
@@ -67,6 +75,11 @@ set(QML_FILES
     ui/components/AppColorField.qml
     ui/components/AppContextMenu.qml
     ui/components/AppDialog.qml
+    # Phase 5 流程 2：滤镜页签业务组件
+    ui/components/AppFilterCard.qml
+    ui/components/AppFilterChainItem.qml
+    ui/components/AppFilterInspector.qml
+    ui/components/AppFilterParameterGroup.qml
     ui/components/AppHistoryItem.qml
     ui/components/AppIconButton.qml
     ui/components/AppImageThumbnail.qml

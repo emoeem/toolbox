@@ -10,6 +10,7 @@ import numpy as np
 
 # import processors 触发全部滤镜注册（FilterDefRegistry 填充）。
 import processors  # noqa: F401
+from processors import filter_presets as preset_store
 from processors.cancellation import CancelToken
 from processors.filter_chain import FilterChain, FilterStep
 from processors.filter_chain_task import downscale_preview, run_filter_chain_sync
@@ -119,3 +120,79 @@ def chain_fingerprint(steps: list[dict[str, Any]]) -> str:
     return hashlib.sha256(
         json.dumps(steps, sort_keys=True, ensure_ascii=False).encode('utf-8'),
     ).hexdigest()[:16]
+
+
+# ---- 滤镜链预设（docs/ipc-protocol.md §3.4）--------------------------------
+#
+# processors/filter_presets.py 是既有资产：存储路径（缺省
+# ~/.toolbox/filter_presets/*.filterchain.json，可被 Settings 覆盖）、临时文件
+# + rename 的原子写与 schema_version 管理全部原样复用，本层只做协议化——
+# 形状裁剪与错误码归一，不重写任何存储逻辑。
+
+def list_presets() -> list[dict[str, Any]]:
+    """filter.presets.list：只暴露协议字段 {name, step_count}（§3.4）。"""
+    presets: list[dict[str, Any]] = []
+    for item in preset_store.list_presets():
+        presets.append({'name': item['name'], 'step_count': item['step_count']})
+    return presets
+
+
+def save_preset(name: Any, steps: Any) -> dict[str, Any]:
+    """filter.presets.save：steps 逐项经 FilterStep.from_dict 校验后存盘。
+
+    形状非法（steps 非数组、缺 filter_key、name 非非空字符串）归一为
+    INVALID_PARAMS；存储层 ValueError（空 name）同样归一。同名预设覆盖
+    （存储层 overwrite=True 缺省语义）。有意不做 FilterDef 参数校验：预设是
+    持久化用户状态，允许保存引用当前环境不可用滤镜的链，参数校验沿用
+    apply 路径（FilterChain.validate_all）。
+    """
+    name = _require_preset_name(name)
+    chain = FilterChain(steps=_validate_preset_steps(steps))
+    try:
+        preset_store.save_preset(name, chain)
+    except ValueError as exc:  # 存储层残余校验（如空 name）
+        raise WorkerError('INVALID_PARAMS', f'保存预设失败: {exc}') from exc
+    return {'saved': True, 'name': name}
+
+
+def load_preset(name: Any) -> dict[str, Any]:
+    """filter.presets.load：不存在 → FILE_NOT_FOUND；文件内容问题 → ENGINE_ERROR。"""
+    name = _require_preset_name(name)
+    try:
+        chain = preset_store.load_preset(name)
+    except FileNotFoundError as exc:
+        raise WorkerError('FILE_NOT_FOUND', f'预设不存在: {name}') from exc
+    except ValueError as exc:  # schema_version 超前 / 步骤解析失败 / JSON 损坏
+        raise WorkerError('ENGINE_ERROR', f'预设文件无法解析: {exc}') from exc
+    return {'name': name, 'steps': [step.to_dict() for step in chain]}
+
+
+def delete_preset(name: Any) -> dict[str, Any]:
+    """filter.presets.delete：预设不存在 → FILE_NOT_FOUND（不谎报删除成功）。"""
+    name = _require_preset_name(name)
+    try:
+        deleted = preset_store.delete_preset(name)
+    except OSError as exc:
+        raise WorkerError('ENGINE_ERROR', f'预设删除失败: {exc}') from exc
+    if not deleted:
+        raise WorkerError('FILE_NOT_FOUND', f'预设不存在: {name}')
+    return {'deleted': True}
+
+
+def _require_preset_name(name: Any) -> str:
+    if not isinstance(name, str) or not name.strip():
+        raise WorkerError('INVALID_PARAMS', 'name 必须是非空字符串')
+    return name
+
+
+def _validate_preset_steps(steps: Any) -> list[FilterStep]:
+    """协议 steps → FilterStep 列表；FilterStep.from_dict 校验失败归一 INVALID_PARAMS。"""
+    if not isinstance(steps, list):
+        raise WorkerError('INVALID_PARAMS', 'steps 必须是数组')
+    validated: list[FilterStep] = []
+    for i, raw in enumerate(steps):
+        try:
+            validated.append(FilterStep.from_dict(raw))
+        except (TypeError, ValueError) as exc:
+            raise WorkerError('INVALID_PARAMS', f'steps[{i}]: {exc}') from exc
+    return validated

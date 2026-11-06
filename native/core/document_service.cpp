@@ -57,6 +57,10 @@ QString DocumentService::taskDisplayName(PendingKind kind, bool preview) {
         return preview ? QStringLiteral("调整预览") : QStringLiteral("应用调整");
     case PendingKind::Transform:
         return preview ? QStringLiteral("变换预览") : QStringLiteral("应用变换");
+    case PendingKind::ApplyFilters:
+        // 任务清单指定：滤镜链的预览与全分辨率行统一叫"滤镜链"——链级任务
+        // 行不区分二者，提交形态由 actionId() 的 filter.preview/apply 区分。
+        return QStringLiteral("滤镜链");
     case PendingKind::Undo:
         return QStringLiteral("撤销");
     case PendingKind::Redo:
@@ -81,6 +85,8 @@ QString DocumentService::actionId(PendingKind kind, bool preview) {
     case PendingKind::Transform:
         return preview ? QStringLiteral("image.transform-preview")
                        : QStringLiteral("image.transform");
+    case PendingKind::ApplyFilters:
+        return preview ? QStringLiteral("filter.preview") : QStringLiteral("filter.apply");
     case PendingKind::Undo:
         return QStringLiteral("image.undo");
     case PendingKind::Redo:
@@ -185,6 +191,34 @@ void DocumentService::transform(const QString &op, const QJsonObject &params, bo
     if (maxSide >= 0)
         request.insert(QStringLiteral("max_side"), maxSide);
     dispatch(PendingKind::Transform, QStringLiteral("image.transform"), request, {}, preview);
+}
+
+void DocumentService::applyFilters(const QJsonArray &steps, bool preview, int maxSide) {
+    // 空链本地拒绝（与 openDocument 非 URL 拒绝同一契约）：未发出请求也要
+    // 恰好一次失败上报，QML 在途门控才有唯一的解除路径。
+    if (steps.isEmpty()) {
+        emit documentError(QStringLiteral("INVALID_PARAMS"), QStringLiteral("滤镜链为空"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::ApplyFilters, preview));
+        return;
+    }
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::ApplyFilters, preview));
+        return;
+    }
+    // filter.preview/apply 的 steps 参数（docs/ipc-protocol.md §3）：数组原样
+    // 上送，元素形状 {filter_key, params, enabled} 的校验归 Worker（提交前
+    // 同步报 INVALID_PARAMS，dispatcher.py _filter_preview_job 注释）。
+    QJsonObject request{
+        {QStringLiteral("document_id"), m_currentDocumentId},
+        {QStringLiteral("filters"), steps},
+        {QStringLiteral("preview"), preview},
+    };
+    if (maxSide >= 0)
+        request.insert(QStringLiteral("max_side"), maxSide);
+    dispatch(PendingKind::ApplyFilters,
+             preview ? QStringLiteral("filter.preview") : QStringLiteral("filter.apply"), request,
+             {}, preview);
 }
 
 void DocumentService::undo() {
@@ -326,6 +360,21 @@ void DocumentService::handleCompleted(const Pending &context, const QJsonObject 
             emit previewReady(result);
             return;
         }
+        applyCompletedVersion(result, true);
+        return;
+    case PendingKind::ApplyFilters:
+        if (stale)
+            return;
+        if (context.preview) {
+            // filter.preview 完成：result = {path, width, height, sha256,
+            // preview_of, fingerprint}，不含 version（§3.1：预览不递增版本），
+            // 只刷新画布。
+            emit previewReady(result);
+            return;
+        }
+        // filter.apply 完成：result = {version, width, height}（§3.1：全分辨率
+        // 递增 version、置 modified；历史条目名 filter.apply，§3.3）。无像素
+        // 文件，不发 previewReady。
         applyCompletedVersion(result, true);
         return;
     case PendingKind::Undo:

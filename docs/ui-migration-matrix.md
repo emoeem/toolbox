@@ -16,6 +16,18 @@
 > `已迁移` 并回填验收记录。Phase 列沿用 Phase 0 定稿时的计划分批（4 第一批
 > /第三批/第五批），不改列；该批功能对应总纲 §7 现行 Phase 5 定义。
 
+> **Phase 6A 进度备注（2026-11-07）**：滤镜系统垂直切片（滤镜目录浏览与搜索 /
+> FilterDef 参数定义驱动控件 / 滤镜链增删排序启停 / 整链预览与应用 / 预设
+> 保存加载删除）已在 `phase5-core-editing` 分支实现，状态口径
+> `code_complete / static_reviewed`（CHANGELOG Phase 6A 条目）。按本文件头部
+> 规则，`已迁移` 要求"新 UI 中真实可用并验收"，CI 单测不构成改判依据，故
+> §1 相关行状态仍为 **`待迁移`**，括注仅为进度说明而非状态档位；实机验收
+> 清单见 docs/phase6a-acceptance.md（流程 2 端到端 / G'MIC 类滤镜置灰 /
+> 预览防抖与取消），通过后统一改判 `已迁移` 并回填验收记录。LUT 未在该批
+> 范围（协议无 lut.* 动作）；G'MIC 库本体未在该批（§2 行，置灰机制除外）。
+> 预览缓存（流程 2"缓存 key = 链参数指纹"）与链拖拽排序未实现，见
+> CHANGELOG Phase 6A 已知限制。
+
 ## 0. 全局功能（不属于单一工具）
 
 | 现有功能 | 旧入口 | Phase | 状态 |
@@ -41,9 +53,9 @@
 | 调整（亮度/对比度/饱和度/伽马/曝光/色相/自然饱和度/高光阴影） | `_build_adjust_panel` `app/main_window.py:721` | `core.brightness/contrast/saturation/gamma/exposure/hue_shift/vibrance/highlights_shadows` | numpy/cv2 | 4 第三批 | 待迁移（Phase 5 已实现九键 image.adjust + 滑杆预览/应用，待实机验收） |
 | 裁剪（尺寸/中心/比例） | `1781` | `core.crop/center_crop/aspect_crop` | — | 4 第三批 | 待迁移 |
 | 变换（旋转/90°/翻转/缩放） | `1881` | `core.rotate/flip_h/flip_v/scale` | — | 4 第三批 | 待迁移（Phase 5 已接入旋转90°/水平翻转/垂直翻转；crop/scale 有协议支持、无 UI 入口，待实机验收） |
-| 滤镜（78 内置，可搜索调参预览） | `944` | `FilterDefRegistry` + `filters.ALL_FILTERS` | opencv/skimage | 4 第四批 | 待迁移 |
-| 滤镜链（增删/排序/启停/预设持久化） | `1000-1244` | `filter_chain` + `filter_presets` | — | 4 第四批 | 待迁移 |
-| LUT / 色调曲线 | `3096` | `lut.apply_lut/tone_curve`（.cube 加载 UI 未接） | — | 4 第四批 | 待迁移（补 .cube） |
+| 滤镜（78 内置，可搜索调参预览） | `944` | `FilterDefRegistry` + `filters.ALL_FILTERS` | opencv/skimage | 4 第四批 | 待迁移（Phase 6A 已实现滤镜页签：目录浏览/搜索、FilterDef 参数控件、不可用滤镜置灰 + 原因、整链预览与应用；预览缓存未实现，待实机验收） |
+| 滤镜链（增删/排序/启停/预设持久化） | `1000-1244` | `filter_chain` + `filter_presets` | — | 4 第四批 | 待迁移（Phase 6A 已实现链增删/↑↓排序/启停与 `filter.presets.*` 四动作保存/加载/删除接线；拖拽排序未实现（↑/↓ 代替），待实机验收） |
+| LUT / 色调曲线 | `3096` | `lut.apply_lut/tone_curve`（.cube 加载 UI 未接） | — | 4 第四批 | 待迁移（补 .cube；Phase 6A 滤镜页签未含 LUT——协议无 `lut.*` 动作，.cube 加载仍无 UI） |
 | 高级胶片滤镜（45+） | `4279` | `advanced_filters`（75 函数） | numpy/cv2 | 4 第四批 | 待迁移 |
 | 色彩工具（反色/灰度/均衡/CLAHE/暗角/5 色调色板） | `1712` | `core.invert/grayscale/histogram_equalize/clahe/vignette` | — | 4 第三批 | 待迁移 |
 | 格式转换（PNG/JPEG/WebP/TIFF/BMP/HEIC/AVIF/JXL/ICO） | `1378` | `utils.save_image` | pillow-heif/avif/jxl 可选 | 4 第一批 | 待迁移 |
@@ -53,7 +65,7 @@
 
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
-| G'MIC 滤镜库（命令行应用 + 帮助） | `1928` | `processors/gmic.py`（未走 backends/ 抽象，双轨之一） | **gmic** | 5 | 待迁移（收敛到 backends/） |
+| G'MIC 滤镜库（命令行应用 + 帮助） | `1928` | `processors/gmic.py`（未走 backends/ 抽象，双轨之一） | **gmic** | 5 | 待迁移（收敛到 backends/；Phase 6A 滤镜页签交付依赖缺失置灰机制 available/optional_deps，但 G'MIC 滤镜未进入 FilterDefRegistry，库本体未迁移） |
 
 ## 3. 图像创作（Phase 5）
 
