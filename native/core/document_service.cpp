@@ -134,7 +134,10 @@ void DocumentService::openDocument(const QUrl &file) {
 
 void DocumentService::saveDocument(const QString &path, int quality) {
     if (m_currentDocumentId.isEmpty()) {
+        // 本地拒绝同样发 actionFailed：统一契约——每个未落定的动作调用恰好
+        // 对应一次失败信号，QML 在途门控永不卡死（CI 实证 unboundBackend 用例）。
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::Save, false));
         return;
     }
     if (path.isEmpty()) {
@@ -153,6 +156,7 @@ void DocumentService::saveDocument(const QString &path, int quality) {
 void DocumentService::adjust(const QJsonObject &adjustments, bool preview, int maxSide) {
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::Adjust, preview));
         return;
     }
     QJsonObject params{
@@ -169,6 +173,7 @@ void DocumentService::transform(const QString &op, const QJsonObject &params, bo
                                 int maxSide) {
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::Transform, preview));
         return;
     }
     QJsonObject request{
@@ -185,6 +190,7 @@ void DocumentService::transform(const QString &op, const QJsonObject &params, bo
 void DocumentService::undo() {
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::Undo, false));
         return;
     }
     dispatch(PendingKind::Undo, QStringLiteral("image.undo"),
@@ -194,6 +200,7 @@ void DocumentService::undo() {
 void DocumentService::redo() {
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::Redo, false));
         return;
     }
     dispatch(PendingKind::Redo, QStringLiteral("image.redo"),
@@ -203,6 +210,7 @@ void DocumentService::redo() {
 void DocumentService::reset() {
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::Reset, false));
         return;
     }
     dispatch(PendingKind::Reset, QStringLiteral("image.reset"),
@@ -212,6 +220,7 @@ void DocumentService::reset() {
 void DocumentService::requestHistory() {
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::History, false));
         return;
     }
     dispatch(PendingKind::History, QStringLiteral("image.history"),
