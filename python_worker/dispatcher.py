@@ -7,7 +7,8 @@ from typing import Any, Callable
 
 from . import protocol
 from .adapters import filter_adapter
-from .adapters.image_adapter import DocumentStore, WorkerError
+from .adapters.image_adapter import (ADJUST_KEYS, TRANSFORM_REQUIRED_PARAMS, Document, DocumentStore,
+                                     WorkerError, adjust_chain, apply_transform)
 from .task_runtime import TaskRuntime
 
 WORKER_VERSION = '1.0.0'
@@ -40,12 +41,18 @@ class Dispatcher:
             'image.open': self._image_open,
             'image.close': self._image_close,
             'image.metadata': self._image_metadata,
+            'image.history': self._image_history,
             'filter.list': self._filter_list,
             'task.cancel': self._task_cancel,
             'task.query': self._task_query,
         }
         self._async: dict[str, Callable[[dict], Callable[..., dict]]] = {
             'image.save': self._image_save_job,
+            'image.adjust': self._image_adjust_job,
+            'image.transform': self._image_transform_job,
+            'image.undo': self._image_undo_job,
+            'image.redo': self._image_redo_job,
+            'image.reset': self._image_reset_job,
             'filter.preview': self._filter_preview_job,
             'filter.apply': self._filter_apply_job,
         }
@@ -150,6 +157,10 @@ class Dispatcher:
             'modified': doc.modified,
         }
 
+    def _image_history(self, params: dict) -> dict[str, Any]:
+        doc = self.ctx.store.get(_require(params, 'document_id'))
+        return self.ctx.store.history(doc)
+
     def _filter_list(self, _params: dict) -> dict[str, Any]:
         return {'filters': filter_adapter.list_filters()}
 
@@ -208,11 +219,129 @@ class Dispatcher:
         def job(progress_cb, cancel_token) -> dict:
             doc = store.get(document_id)
             result_image = filter_adapter.run_chain(doc.image, chain, progress_cb, cancel_token)
+            # 全分辨率变更进历史（协议 §3.3：filter.apply 也产生 undo 条目）。
+            store._push_history(doc, 'filter.apply')
             doc.image = result_image
             doc.modified = True
-            return {'width': int(result_image.shape[1]), 'height': int(result_image.shape[0])}
+            doc.version += 1  # 协议 §3.1
+            return {'width': int(result_image.shape[1]),
+                    'height': int(result_image.shape[0]),
+                    'version': doc.version}
 
         return job
+
+    # ---- image.adjust / image.transform / 历史恢复（docs/ipc-protocol.md §3.1-§3.3）----
+    #
+    # 约定：可在提交任务前判定的错误（参数形状、栈空、crop 越界）在工厂里同步抛出
+    # WorkerError，直接成为错误响应、不产生 task_id（与 filter.preview 的链校验一致）；
+    # 任务体只做像素操作与预览文件写入，走 §2.3/§7 的标准任务生命周期。
+
+    def _image_adjust_job(self, params: dict) -> Callable[..., dict]:
+        document_id = _require(params, 'document_id')
+        adjustments = _validate_adjustments(params.get('adjustments'))
+        preview = _require_preview_flag(params.get('preview'))
+        max_side = _require_max_side(params.get('max_side'))
+        store = self.ctx.store
+        temp_dir = self.ctx.temp_dir
+
+        if preview:
+            def job(progress_cb, cancel_token) -> dict:
+                doc = store.get(document_id)
+                version = doc.version  # §2.3：预览 result.version = 执行时的当前版本（与预览所据像素一致）
+                progress_cb(5, '计算调整预览')
+                cancel_token.raise_if_cancelled()
+                adjusted = adjust_chain(doc.image, adjustments)
+                progress_cb(90, '写入预览文件')
+                info = filter_adapter.write_preview(adjusted, temp_dir, document_id, max_side)
+                return {'version': version, 'path': info['path'],
+                        'width': info['width'], 'height': info['height'],
+                        'sha256': info['sha256']}
+
+        else:
+            def job(progress_cb, cancel_token) -> dict:
+                doc = store.get(document_id)
+                progress_cb(10, '应用调整')
+                cancel_token.raise_if_cancelled()
+                adjusted = adjust_chain(doc.image, adjustments)
+                cancel_token.raise_if_cancelled()
+                store._push_history(doc, 'image.adjust')
+                doc.image = adjusted
+                doc.modified = True
+                doc.version += 1
+                return {'version': doc.version,
+                        'width': int(adjusted.shape[1]), 'height': int(adjusted.shape[0])}
+
+        return job
+
+    def _image_transform_job(self, params: dict) -> Callable[..., dict]:
+        document_id = _require(params, 'document_id')
+        op = params.get('op')
+        # JSON 值可能是任意类型：非字符串先拒绝，避免对 dict 做不可哈希成员测试。
+        if not isinstance(op, str) or op not in TRANSFORM_REQUIRED_PARAMS:
+            raise WorkerError(protocol.ERR_INVALID_PARAMS, f'未知变换 op: {op}')
+        transform_params = _validate_transform_params(op, params.get('params'))
+        if op == 'scale' and transform_params['sx'] <= 0:
+            raise WorkerError(protocol.ERR_INVALID_PARAMS, 'scale 的 sx 必须 > 0')
+        if op == 'crop':
+            x, y, w, h = (transform_params[key] for key in ('x', 'y', 'w', 'h'))
+            if w <= 0 or h <= 0:
+                raise WorkerError(protocol.ERR_INVALID_PARAMS, 'crop 的 w/h 必须 > 0')
+            # 越界判定需要当前图像尺寸：提交前同步检查（协议 §3.2）。
+            image = self.ctx.store.get(document_id).image
+            if x < 0 or y < 0 or x + w > int(image.shape[1]) or y + h > int(image.shape[0]):
+                raise WorkerError(protocol.ERR_INVALID_PARAMS, 'crop 矩形超出图像范围')
+        preview = _require_preview_flag(params.get('preview'))
+        max_side = _require_max_side(params.get('max_side'))
+        store = self.ctx.store
+        temp_dir = self.ctx.temp_dir
+
+        if preview:
+            def job(progress_cb, cancel_token) -> dict:
+                doc = store.get(document_id)
+                version = doc.version  # §2.3：预览 result.version = 执行时的当前版本（与预览所据像素一致）
+                progress_cb(5, '计算变换预览')
+                cancel_token.raise_if_cancelled()
+                transformed = apply_transform(doc.image, op, transform_params)
+                progress_cb(90, '写入预览文件')
+                info = filter_adapter.write_preview(transformed, temp_dir, document_id, max_side)
+                return {'version': version, 'path': info['path'],
+                        'width': info['width'], 'height': info['height'],
+                        'sha256': info['sha256']}
+
+        else:
+            def job(progress_cb, cancel_token) -> dict:
+                doc = store.get(document_id)
+                progress_cb(10, '应用变换')
+                cancel_token.raise_if_cancelled()
+                transformed = apply_transform(doc.image, op, transform_params)
+                cancel_token.raise_if_cancelled()
+                store._push_history(doc, 'image.transform')
+                doc.image = transformed
+                doc.modified = True
+                doc.version += 1
+                return {'version': doc.version,
+                        'width': int(transformed.shape[1]), 'height': int(transformed.shape[0])}
+
+        return job
+
+    def _image_undo_job(self, params: dict) -> Callable[..., dict]:
+        document_id = _require(params, 'document_id')
+        doc = self.ctx.store.get(document_id)  # 同步 UNKNOWN_DOCUMENT / UNREDOABLE（协议 §3.3）
+        if not doc.undo_stack:
+            raise WorkerError(protocol.ERR_UNREDOABLE, f'文档无可撤销条目: {document_id}')
+        return _history_restore_job(self.ctx, document_id, self.ctx.store.undo)
+
+    def _image_redo_job(self, params: dict) -> Callable[..., dict]:
+        document_id = _require(params, 'document_id')
+        doc = self.ctx.store.get(document_id)
+        if not doc.redo_stack:
+            raise WorkerError(protocol.ERR_UNREDOABLE, f'文档无可重做条目: {document_id}')
+        return _history_restore_job(self.ctx, document_id, self.ctx.store.redo)
+
+    def _image_reset_job(self, params: dict) -> Callable[..., dict]:
+        document_id = _require(params, 'document_id')
+        self.ctx.store.get(document_id)  # 提交前确认文档存在（同步 UNKNOWN_DOCUMENT）
+        return _history_restore_job(self.ctx, document_id, self.ctx.store.reset)
 
 
 def _require(params: dict, key: str) -> str:
@@ -220,6 +349,84 @@ def _require(params: dict, key: str) -> str:
     if not value:
         raise WorkerError(protocol.ERR_INVALID_PARAMS, f'缺少 {key}')
     return str(value)
+
+
+def _require_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise WorkerError(protocol.ERR_INVALID_PARAMS, f'{label} 必须是数值')
+    return float(value)
+
+
+def _require_int(value: Any, label: str) -> int:
+    number = _require_number(value, label)
+    if not number.is_integer():
+        raise WorkerError(protocol.ERR_INVALID_PARAMS, f'{label} 必须是整数')
+    return int(number)
+
+
+def _require_preview_flag(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise WorkerError(protocol.ERR_INVALID_PARAMS, 'preview 必须是布尔值')
+    return value
+
+
+def _require_max_side(value: Any) -> int:
+    if value is None:
+        return 768  # 协议 §3.2：与 filter.preview 同缺省
+    return _require_int(value, 'max_side')
+
+
+def _validate_adjustments(raw: Any) -> dict[str, float]:
+    """image.adjust 的 adjustments 校验（协议 §3.2）：非空对象、键合法、值均为数值。"""
+    if not isinstance(raw, dict) or not raw:
+        raise WorkerError(protocol.ERR_INVALID_PARAMS, 'adjustments 必须是非空对象')
+    adjustments: dict[str, float] = {}
+    for key, value in raw.items():
+        if key not in ADJUST_KEYS:
+            raise WorkerError(protocol.ERR_INVALID_PARAMS, f'未知调整键: {key}')
+        adjustments[key] = _require_number(value, f'adjustments.{key}')
+    return adjustments
+
+
+def _validate_transform_params(op: str, raw: Any) -> dict[str, Any]:
+    """image.transform 的 params 校验（协议 §3.2 op/params 对应表）。"""
+    if not isinstance(raw, dict):
+        raise WorkerError(protocol.ERR_INVALID_PARAMS, 'params 必须是对象')
+    validated: dict[str, Any] = {}
+    for key in TRANSFORM_REQUIRED_PARAMS[op]:
+        if key not in raw:
+            raise WorkerError(protocol.ERR_INVALID_PARAMS, f'op={op} 缺少参数: {key}')
+        if key in ('x', 'y', 'w', 'h'):
+            validated[key] = _require_int(raw[key], f'params.{key}')
+        else:
+            validated[key] = _require_number(raw[key], f'params.{key}')
+    return validated
+
+
+def _history_restore_job(ctx: WorkerContext, document_id: str,
+                         restore: Callable[[Document], None]) -> Callable[..., dict]:
+    """image.undo / image.redo / image.reset 共用任务体（协议 §3.3）。
+
+    恢复像素 → version += 1 → 写降采样预览文件（write_preview 缺省 max_side=768）。
+    栈空在提交前已同步拒绝；任务体内再遇栈空（并发竞态）会抛
+    WorkerError(UNREDOABLE)，由任务运行时归一为失败事件，不会谎报成功。
+    """
+    store = ctx.store
+    temp_dir = ctx.temp_dir
+
+    def job(progress_cb, cancel_token) -> dict:
+        doc = store.get(document_id)
+        progress_cb(30, '恢复像素')
+        cancel_token.raise_if_cancelled()
+        restore(doc)
+        doc.version += 1  # 协议 §3.1：undo/redo/reset 同样递增
+        progress_cb(85, '写入预览文件')
+        info = filter_adapter.write_preview(doc.image, temp_dir, document_id)
+        return {'version': doc.version,
+                'width': int(doc.image.shape[1]), 'height': int(doc.image.shape[0]),
+                'path': info['path'], 'sha256': info['sha256']}
+
+    return job
 
 
 def _pid() -> int:

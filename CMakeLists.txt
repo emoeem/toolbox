@@ -27,6 +27,11 @@ qt_add_executable(toolbox
     native/services/settings_service.cpp
     native/services/font_service.h
     native/services/font_service.cpp
+    # Phase 4: 文档服务（编辑器状态 facade）与撤销历史模型
+    native/core/document_service.h
+    native/core/document_service.cpp
+    native/models/history_model.h
+    native/models/history_model.cpp
     native/graphics/image_canvas.h
     native/graphics/image_canvas.cpp
     # Phase 3: Worker 进程管理与 IPC
@@ -45,6 +50,7 @@ qt_add_executable(toolbox
 target_include_directories(toolbox PRIVATE
     ${CMAKE_SOURCE_DIR}/native
     ${CMAKE_SOURCE_DIR}/native/app
+    ${CMAKE_SOURCE_DIR}/native/core
     ${CMAKE_SOURCE_DIR}/native/models
     ${CMAKE_SOURCE_DIR}/native/services
     ${CMAKE_SOURCE_DIR}/native/backend

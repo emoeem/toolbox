@@ -1,5 +1,159 @@
 # Changelog
 
+## 2026-11-06 (Phase 5 — 核心图像编辑工作流)
+
+依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 5（核心图像编辑工作流，
+5A 文件工作流 / 5B 画布接线 / 5C 基础编辑 / 5D 图像状态）交付真实可用的编辑
+垂直切片。状态口径（总纲 §14.2）：本批全部为 **code_complete /
+static_reviewed**；Linux 目标环境验收清单见 `docs/phase5-acceptance.md`
+（垂直切片端到端 / undo 像素回归 / Worker 崩溃后 document_id 失效提示 /
+大图不卡 UI / 取消行为），未执行任何目标环境运行验证；迁移矩阵相关行
+按其状态取值规则保持 **待迁移**（ui-migration-matrix.md 头部）。
+
+> **CI 覆盖说明**：逻辑层验证已就位，随既有 CI 机制纳入执行——test job 的
+> `unittest discover` 纳入 `tests/test_worker_edit.py`（12 用例：adjust 预览/
+> 全分辨率、transform 五 op、undo/redo/reset 往返与栈空 `UNREDOABLE` 同步
+> 拒绝、history 演进与 redo 分支截断、历史深度淘汰不变量、`UNKNOWN_DOCUMENT`
+> 路径、filter.apply 衔接）；native job 的 CTest 注册 `document_service`
+> （21 用例：version/modified 状态机、reset 清 modified、异步动作受理登记
+> TaskModel 任务行、undo/redo/reset 画布刷新文件、陈旧任务丢弃、HistoryModel
+> 契约）。截至本条目撰写 Phase 5 改动尚未提交推送，推送后实际运行结果以
+> GitHub Actions 为准；进程、GUI 与交互项不在 CI 覆盖内，必须实机
+> （docs/phase5-acceptance.md §2-§6）。
+
+### Added（协议与 Worker）
+
+- `docs/ipc-protocol.md`：§3.1 文档版本（`version`：open=0，全分辨率变更与
+  undo/redo/reset 各 +1，预览不递增——预览 `result.version` 为执行时的当前
+  版本，与预览所据像素一致）、§3.2 `image.adjust` / `image.transform`
+  （九调整键与五 transform op 的参数校验；§2.3 同步限定 undo/redo/reset 才
+  携带画布刷新文件，adjust/transform 全分辨率 result 仅 version/width/height）、
+  §3.3 `image.undo` / `image.redo` / `image.reset` / `image.history`（历史栈
+  语义与 `UNREDOABLE` 提交前同步判定；`reset` 后 `modified=false` 两端一致）、
+  §5 新增错误码 `UNREDOABLE`、§7 新动作纳入既有取消语义。`protocol` 保持 `1`
+  （纯新增动作 + `filter.apply` 结果新增 `version` 字段，符合 §8 兼容性规则）。
+  文档头部 Phase 4 增补注记已改写为既成事实表述（两端实现与两端测试已同步
+  落地，"Worker 会按 UNKNOWN_ACTION 拒绝"的旧结论不再成立）。
+- `python_worker/adapters/image_adapter.py`：`Document` 编辑状态（version /
+  source_image / undo_stack / redo_stack / dropped_names）；`HistoryMixin`
+  像素快照历史（30 条 + 512MB 预算、非栈顶变更截断 redo 分支，时机约束
+  对齐旧 app `_push_history`，`app/main_window.py:346-374`）；淘汰保持 §3.3
+  契约——底条目改写为源图共享引用（钉住 open 态，undo 到底恒回 open）、
+  深度淘汰的动作名记入 `dropped_names` 供 history() 对齐条目名，redo 分支
+  按重做顺序排列；`adjust_chain`（旧 app 调整顺序 + 近默认键剪枝）与
+  `apply_transform`（rotate / flip_h / flip_v / scale / crop 直调
+  `processors.core`，不重写算法）。
+- `python_worker/dispatcher.py`：新增 async 动作 `image.adjust` /
+  `image.transform` / `image.undo` / `image.redo` / `image.reset` 与 sync 动作
+  `image.history`；参数形状、栈空、crop 越界在提交任务前同步报
+  `INVALID_PARAMS` / `UNREDOABLE`；undo/redo/reset 共用恢复任务体（恢复像素 →
+  `version`+1 → 写降采样画布刷新文件）；`filter.apply` 进历史并回传
+  `version`。
+- `python_worker/protocol.py`：新增错误码 `ERR_UNREDOABLE`。
+
+### Added（C++ 服务与模型）
+
+- `native/core/document_service.{h,cpp}`：文档/编辑状态 facade（QML 单例，
+  QML 侧 `bindBackend` / `bindTaskModel` 接线）：`openDocument` / `saveDocument` /
+  `adjust` / `transform` / `undo` / `redo` / `reset` / `requestHistory`；
+  异步动作受理即经 `TaskModel.trackRequest` 登记任务行（任务抽屉/状态栏摘要
+  与行内取消对编辑动作生效，§2.3）；version/modified 语义逐条对齐协议
+  §3.1/§3.3（reset 完成清 modified，与 Worker 端一致）；`previewReady` 通道
+  同时承载预览结果与 undo/redo/reset 的画布刷新文件（§3.3）；陈旧任务按提交
+  时 documentId 丢弃（version 是旧任务结果丢弃依据）；新增
+  `documentActionFailed(documentId, action)`：已跟踪动作未落定（提交前同步
+  拒绝 / task.failed / 异步响应缺 task_id / 后端未绑定）时携带提交上下文，
+  action 为协议动作名（预览带 "-preview" 后缀）——`documentError` 保持纯
+  用户呈现，QML 在途门控只按 documentActionFailed 的双重上下文（当前文档 +
+  全分辨率动作）解锁；未绑定后端 / 未开文档本地拒绝，不伪造受理；打开成功
+  写入 `SettingsService.addRecentFile` 并对旧文档发 `image.close` 回收（在途
+  豁免，见已知限制）。
+- `native/backend/ipc_protocol.h`：稳定错误码表补齐 `kErrUnredoable`
+  （与 docs/ipc-protocol.md §5 / python_worker/protocol.py 同步）。
+- `native/models/history_model.{h,cpp}`：`image.history` 结果驱动的撤销历史
+  行模型（histIndex / histName / histCurrent 角色 + canUndo / canRedo 属性，
+  整表重建、空对象兜底清空）；条目名本地化归 QML 侧。
+- `CMakeLists.txt`：编入 document_service 与 history_model 源文件及 include
+  路径。
+
+### Added（QML 编辑工作流）
+
+- `ui/pages/EditorPage.qml` 由 Phase 2 原型（172 行：打开 + 显示 + 缩放平移）
+  重写为真实编辑工作区（ui-page-spec §2）：打开 / 保存 / 另存为 FileDialog 与
+  拖放；九滑杆调整检查器（中性基线与 Worker `_ADJUST_STEPS` 一致，gamma 中性
+  1.0）；300ms 防抖预览 + dragFinished 立即预览（max_side 768）；应用后滑杆
+  回中性基线（防叠加）；旋转 90° / 水平翻转 / 垂直翻转按钮；撤销 / 重做 /
+  重置按钮随 HistoryModel canUndo / canRedo 启停，并与撤销/重做/重置/保存
+  （含快捷键与另存为）一同受 `!fullResInFlight` 门控——全分辨率任务在途时
+  暂停受理，避免多线程任务池下历史栈改写与保存像素的执行时序竞态；门控
+  标志在换文档时（onDocumentOpened）显式作废（陈旧完成不发任何信号，旧
+  文档 v0 时否则会永久卡死），解锁经 `documentActionFailed` 双重上下文限定
+  于"当前文档的全分辨率提交失败"（旧文档失败按 documentId 忽略、同文档
+  预览失败按 -preview 后缀忽略，均不得提前解锁）；撤销/重做/重置
+  入口（按钮与 Ctrl+Z / Ctrl+Shift+Z）另受 backendReady 门控，Worker 未
+  就绪时不再静默空操作；Ctrl+S / Ctrl+Shift+S 经保存对话框的
+  ensureBackendReady 校验；状态栏 `宽×高 · vN` 与未保存 `●`；预览 URL 携带
+  `?v=` 递增查询强制重载（同路径临时文件覆盖场景的可靠刷新）；Worker 未就绪
+  Toast 与检查器降级横幅；任务摘要按钮 + AppTaskQueuePanel 抽屉复用。
+
+### Added（测试）
+
+- `tests/test_worker_edit.py`（新文件，12 用例，进程内 Dispatcher +
+  TaskRuntime）：adjust 预览不改文档 / 全分辨率往返（undo→redo→reset 的
+  sha256 像素对照）、transform 五 op（crop 改尺寸、scale 预览、flip_h/flip_v、
+  rotate 像素变化可撤销）、栈空 undo/redo 同步 `UNREDOABLE`、未编辑文档
+  reset、unknown document 的同步与异步错误路径、history 演进与 redo 分支
+  截断、历史深度淘汰（底条目钉住源图、条目名对齐、redo 分支按重做顺序）、
+  filter.apply 衔接、参数校验。其中 rotate / UNKNOWN_DOCUMENT / 未编辑
+  reset / 深度淘汰四个用例为本批补齐（覆盖缺口核对后新增）。
+- `tests/native/test_document_service.cpp`（新文件，21 用例，与
+  test_task_model 同款信号模拟、不启动 Worker）：DocumentService 打开/保存/
+  调整/变换/撤销的 version 与 modified 状态机（reset 清 modified、保存失败
+  保持脏标记）、异步动作受理登记 TaskModel 任务行（bindTaskModel）、预览不
+  触状态、undo/reset 完成携带画布刷新文件、本地拒绝与协议违约如实上报、
+  未落定动作发 documentActionFailed（提交 documentId + 动作标识，预览带
+  -preview 后缀）、陈旧任务丢弃、addRecentFile 副作用；HistoryModel 刷新/
+  角色名/空历史兜底。
+- `tests/native/CMakeLists.txt`：注册 `document_service` CTest 目标。
+
+### Added（文档）
+
+- `docs/phase5-acceptance.md`：Linux 目标环境验收清单，明确"CI 已覆盖
+  （§1）与必须实机（§2-§6）"的分工：垂直切片端到端、undo 像素回归（与
+  Phase 0 引擎基线的关系与无 GUI sha256 核对脚本）、Worker 崩溃后
+  document_id 失效提示、大图不卡 UI、取消行为、最近文件。
+
+### 已知限制（如实记录）
+
+- crop / scale 协议与 Worker 已支持，EditorPage 尚无 UI 入口（本批仅旋转
+  90° / 翻转按钮）。
+- ui-page-spec §2 的"Esc 取消在途预览"未实现（ImageCanvas 无 Esc 处理）；
+  取消入口当前只有任务抽屉行内按钮（TaskModel.cancelTask → task.cancel）。
+- Worker 崩溃后 BackendManager 不反向清空 DocumentService.currentDocumentId
+  （document_service.cpp 未连接 errorOccurred）：崩溃到下一次操作之间 UI 仍
+  显示旧文件名与旧状态，旧 document_id 的失效提示依赖下一次操作的
+  `UNKNOWN_DOCUMENT` 错误兜底（docs/phase5-acceptance.md §4 如实验收）。
+- HomePage 最近文件行为只读展示（点击打开未接线，打开入口在 EditorPage）。
+- 非 crop 的 `image.adjust` / `image.transform` 遇未知 document 在任务体内
+  才失败，任务运行时把任务体异常统一归一为 `ENGINE_ERROR`
+  （WorkerError.code 不进 task.failed 事件）；undo/redo/reset/history 与
+  crop 的未知文档为提交前同步 `UNKNOWN_DOCUMENT`。测试按现状断言
+  （tests/test_worker_edit.py test_unknown_document_rejected_for_edit_actions）。
+- 检查器仅"调整"页签（含伽马共 9 个滑杆；ui-page-spec §2 列 8 个、无伽马）；
+  检查器内无[重置]按钮——重置为工具栏入口、语义为 §3.3 重置到源图，
+  ui-page-spec §2 的检查器[重置]"回滚到已应用状态"未实现且语义不等价；
+  ui-page-spec §2 对应行修订与加载态表述修订同批进行
+  （docs/phase5-acceptance.md §8 如实记录）；滤镜页签（流程 2）随 Phase 6
+  滤镜系统交付。
+- 换文档时的 `image.close` 回收有在途豁免：旧文档仍有在途任务（如在途
+  保存）时跳过本次回收（close 会把合法任务打成 `UNKNOWN_DOCUMENT` 失败），
+  被跳过的旧文档随下次切换或 Worker 退出回收
+  （docs/phase5-acceptance.md §8 偏差 2）。
+- 大图打开首帧为 GUI 线程本地同步解码（ImageCanvas::setSource），40MP 级
+  阻塞可达秒级；预览/应用/撤销阶段保持主线程零像素计算。打开链路异步化与
+  ui-page-spec §2 加载态表述修订留待后续批次
+  （docs/phase5-acceptance.md §5/§8 偏差 1）。
+
 ## 2026-11-06 (Phase 4 — 新 UI 基础设施与应用壳)
 
 依据总纲 `docs/toolbox-2.0-project-plan.md` Phase 4 任务清单完成：统一 UI

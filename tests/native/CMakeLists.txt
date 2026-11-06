@@ -93,3 +93,30 @@ target_sources(test_font_service PRIVATE
 target_include_directories(test_font_service PRIVATE
     ${CMAKE_SOURCE_DIR}/native
 )
+
+# DocumentService + HistoryModel + TaskModel: the service consumes
+# BackendManager signals (test emits them directly, no Worker process — same
+# harness as test_task_model above), calls
+# SettingsService::instance()->addRecentFile on open success and registers
+# async actions with TaskModel::trackRequest (bindTaskModel), so the backend/,
+# models/ and services/ sources are compiled in as well. Both service sources
+# use the QML singleton factory, hence Qt6::Qml.
+qt_add_executable(test_document_service test_document_service.cpp)
+target_link_libraries(test_document_service PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME document_service COMMAND test_document_service)
+target_sources(test_document_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/core/document_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/history_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/task_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/services/settings_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/python_worker.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/ipc_protocol.cpp
+)
+target_include_directories(test_document_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)

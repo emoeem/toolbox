@@ -7,16 +7,25 @@
 >
 > 现状证据与调用关系见 [architecture.md](architecture.md)。
 
+> **Phase 5 进度备注（2026-11-06）**：核心图像编辑工作流垂直切片（打开/保存/
+> 最近文件写入/画布接线/基础调整/撤销重做重置）已在 `phase4-ui-infra` 分支
+> 实现，状态口径 `code_complete / static_reviewed`（CHANGELOG Phase 5 条目）。
+> 按本文件头部规则，`已迁移` 要求"新 UI 中真实可用并验收"，CI 单测不构成
+> 改判依据，故下方相关行状态仍为 **`待迁移`**，括注仅为进度说明而非状态
+> 档位；实机验收清单见 docs/phase5-acceptance.md，通过后统一改判
+> `已迁移` 并回填验收记录。Phase 列沿用 Phase 0 定稿时的计划分批（4 第一批
+> /第三批/第五批），不改列；该批功能对应总纲 §7 现行 Phase 5 定义。
+
 ## 0. 全局功能（不属于单一工具）
 
 | 现有功能 | 旧入口 | Phase | 状态 |
 |---|---|---|---|
-| 打开 / 保存 / 另存为 | `app/main_window.py:2253-2310` | 4 第一批 | 待迁移 |
-| 拖放打开图像 | `app/preview_widget.py:194-205` | 4 第一批 | 待迁移 |
-| 最近文件 | `app/main_window.py:2276-2278`（列表不持久化，属已知缺陷） | 4 第一批 | 待迁移（含持久化修复） |
+| 打开 / 保存 / 另存为 | `app/main_window.py:2253-2310` | 4 第一批 | 待迁移（Phase 5 编辑器内已实现打开/保存/另存链路，待实机验收） |
+| 拖放打开图像 | `app/preview_widget.py:194-205` | 4 第一批 | 待迁移（Phase 5 编辑器画布已接拖放，待实机验收） |
+| 最近文件 | `app/main_window.py:2276-2278`（列表不持久化，属已知缺陷） | 4 第一批 | 待迁移（持久化修复与写入/展示已实现；HomePage 行点击打开未接线，待实机验收） |
 | 图像信息 | `app/main_window.py:2193`、`4101` | 4 第一批 | 待迁移 |
-| 撤销 / 重置 | `app/main_window.py:390, 406` | 4 第五批 | 待迁移（新架构补 Redo） |
-| 缩放/平移/适配/100% | `app/preview_widget.py` | 4 第二批 | 待迁移 |
+| 撤销 / 重置 | `app/main_window.py:390, 406` | 4 第五批 | 待迁移（Phase 5 已实现 undo/redo/reset + HistoryModel——"新架构补 Redo"已落地，待实机验收） |
+| 缩放/平移/适配/100% | `app/preview_widget.py` | 4 第二批 | 待迁移（ImageCanvas 既有能力，Phase 5 编辑器接线缩放控件，待实机验收） |
 | 透明棋盘格 / 图像比较 | `app/preview_widget.py` / `2740` | 4 第二批 | 待迁移 |
 | 工具搜索 Ctrl+K | `app/main_window.py:600` | 3 | 待迁移 |
 | 主题 system/dark/light | `app/main_window.py:578` | 3 | 待迁移 |
@@ -29,9 +38,9 @@
 
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
-| 调整（亮度/对比度/饱和度/伽马/曝光/色相/自然饱和度/高光阴影） | `_build_adjust_panel` `app/main_window.py:721` | `core.brightness/contrast/saturation/gamma/exposure/hue_shift/vibrance/highlights_shadows` | numpy/cv2 | 4 第三批 | 待迁移 |
+| 调整（亮度/对比度/饱和度/伽马/曝光/色相/自然饱和度/高光阴影） | `_build_adjust_panel` `app/main_window.py:721` | `core.brightness/contrast/saturation/gamma/exposure/hue_shift/vibrance/highlights_shadows` | numpy/cv2 | 4 第三批 | 待迁移（Phase 5 已实现九键 image.adjust + 滑杆预览/应用，待实机验收） |
 | 裁剪（尺寸/中心/比例） | `1781` | `core.crop/center_crop/aspect_crop` | — | 4 第三批 | 待迁移 |
-| 变换（旋转/90°/翻转/缩放） | `1881` | `core.rotate/flip_h/flip_v/scale` | — | 4 第三批 | 待迁移 |
+| 变换（旋转/90°/翻转/缩放） | `1881` | `core.rotate/flip_h/flip_v/scale` | — | 4 第三批 | 待迁移（Phase 5 已接入旋转90°/水平翻转/垂直翻转；crop/scale 有协议支持、无 UI 入口，待实机验收） |
 | 滤镜（78 内置，可搜索调参预览） | `944` | `FilterDefRegistry` + `filters.ALL_FILTERS` | opencv/skimage | 4 第四批 | 待迁移 |
 | 滤镜链（增删/排序/启停/预设持久化） | `1000-1244` | `filter_chain` + `filter_presets` | — | 4 第四批 | 待迁移 |
 | LUT / 色调曲线 | `3096` | `lut.apply_lut/tone_curve`（.cube 加载 UI 未接） | — | 4 第四批 | 待迁移（补 .cube） |

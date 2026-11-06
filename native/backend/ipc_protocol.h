@@ -18,6 +18,7 @@ inline constexpr auto kErrUnknownDocument = "UNKNOWN_DOCUMENT";
 inline constexpr auto kErrUnknownTask = "UNKNOWN_TASK";
 inline constexpr auto kErrFileNotFound = "FILE_NOT_FOUND";
 inline constexpr auto kErrUnsupportedFormat = "UNSUPPORTED_FORMAT";
+inline constexpr auto kErrUnredoable = "UNREDOABLE";
 inline constexpr auto kErrCancelled = "CANCELLED";
 inline constexpr auto kErrEngineError = "ENGINE_ERROR";
 inline constexpr auto kErrInternal = "INTERNAL";

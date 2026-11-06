@@ -1,0 +1,410 @@
+#include "document_service.h"
+
+// 连接 BackendManager 的信号需要完整类型（document_service.h 只有前置声明），
+// 与 task_model.cpp 的包含次序同一约定。
+#include "backend/backend_manager.h"
+#include "backend/ipc_protocol.h"
+#include "models/task_model.h"
+#include "services/settings_service.h"
+
+namespace toolbox {
+
+namespace {
+
+DocumentService *s_instance = nullptr; // process-wide singleton identity
+
+} // namespace
+
+DocumentService::DocumentService(QObject *parent) : QObject(parent) {}
+
+DocumentService::~DocumentService() {
+    if (s_instance == this)
+        s_instance = nullptr;
+}
+
+DocumentService *DocumentService::instance() {
+    if (!s_instance)
+        s_instance = new DocumentService();
+    return s_instance;
+}
+
+DocumentService *DocumentService::create(QQmlEngine *qmlEngine, QJSEngine *jsEngine) {
+    // The instance must outlive the engine bindings; ownership stays with QML.
+    Q_UNUSED(qmlEngine);
+    Q_UNUSED(jsEngine);
+    return instance();
+}
+
+void DocumentService::bindBackend(BackendManager *backend) {
+    if (m_backend == backend)
+        return;
+    m_backend = backend;
+    if (!m_backend)
+        return;
+    connect(m_backend, &BackendManager::responseReady, this, &DocumentService::onResponseReady);
+    connect(m_backend, &BackendManager::taskEvent, this, &DocumentService::onTaskEvent);
+}
+
+void DocumentService::bindTaskModel(TaskModel *taskModel) {
+    m_taskModel = taskModel; // 幂等重绑无害；未绑定时不登记，行为回到无任务行
+}
+
+QString DocumentService::taskDisplayName(PendingKind kind, bool preview) {
+    switch (kind) {
+    case PendingKind::Save:
+        return QStringLiteral("保存图像");
+    case PendingKind::Adjust:
+        return preview ? QStringLiteral("调整预览") : QStringLiteral("应用调整");
+    case PendingKind::Transform:
+        return preview ? QStringLiteral("变换预览") : QStringLiteral("应用变换");
+    case PendingKind::Undo:
+        return QStringLiteral("撤销");
+    case PendingKind::Redo:
+        return QStringLiteral("重做");
+    case PendingKind::Reset:
+        return QStringLiteral("重置");
+    case PendingKind::Open:
+    case PendingKind::History:
+        break; // 同步动作不产生任务（响应无 task_id），永不建行
+    }
+    return {};
+}
+
+QString DocumentService::actionId(PendingKind kind, bool preview) {
+    switch (kind) {
+    case PendingKind::Open:
+        return QStringLiteral("image.open");
+    case PendingKind::Save:
+        return QStringLiteral("image.save");
+    case PendingKind::Adjust:
+        return preview ? QStringLiteral("image.adjust-preview") : QStringLiteral("image.adjust");
+    case PendingKind::Transform:
+        return preview ? QStringLiteral("image.transform-preview")
+                       : QStringLiteral("image.transform");
+    case PendingKind::Undo:
+        return QStringLiteral("image.undo");
+    case PendingKind::Redo:
+        return QStringLiteral("image.redo");
+    case PendingKind::Reset:
+        return QStringLiteral("image.reset");
+    case PendingKind::History:
+        return QStringLiteral("image.history");
+    }
+    return {};
+}
+
+QString DocumentService::dispatch(PendingKind kind, const QString &action,
+                                  const QJsonObject &params, const QString &path, bool preview) {
+    if (!m_backend) {
+        // BackendManager::errorOccurred 的 WORKER_START_FAILED 只覆盖进程层面；
+        // 这里是调用层面未接线，归入未分类的内部错误（docs/ipc-protocol.md §5）。
+        // 本次调用未发出，但调用方（QML）可能已置在途标志——按未落定上报。
+        emit documentError(QStringLiteral("INTERNAL"),
+                           QStringLiteral("后端未绑定，无法执行文档操作"));
+        emit documentActionFailed(m_currentDocumentId, actionId(kind, preview));
+        return {};
+    }
+    const QString requestId = m_backend->sendAction(action, params);
+    if (!requestId.isEmpty()) {
+        m_pendingByRequest.insert(requestId, Pending{kind, path, m_currentDocumentId, preview});
+        // 任务行登记（§2.3）：TaskModel 只为 trackRequest 登记过的 request_id
+        // 建行（task_model.cpp:59-77），不登记则该动作永远不进任务抽屉/摘要，
+        // 也没有行内取消入口。同步动作（open/history）无 task_id，不登记。
+        if (m_taskModel) {
+            const QString name = taskDisplayName(kind, preview);
+            if (!name.isEmpty())
+                m_taskModel->trackRequest(requestId, name);
+        }
+    }
+    return requestId;
+}
+
+void DocumentService::openDocument(const QUrl &file) {
+    const QString path = file.toLocalFile();
+    if (path.isEmpty()) {
+        // Worker 只接受文件系统路径（§3 image.open {path}）；非本地 URL 在
+        // 本地直接拒绝，不上送。
+        emit documentError(QStringLiteral("INVALID_PARAMS"),
+                           QStringLiteral("打开路径不是本地文件: %1").arg(file.toString()));
+        return;
+    }
+    dispatch(PendingKind::Open, QStringLiteral("image.open"),
+             QJsonObject{{QStringLiteral("path"), path}}, path);
+}
+
+void DocumentService::saveDocument(const QString &path, int quality) {
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        return;
+    }
+    if (path.isEmpty()) {
+        emit documentError(QStringLiteral("INVALID_PARAMS"), QStringLiteral("保存路径为空"));
+        return;
+    }
+    QJsonObject params{
+        {QStringLiteral("document_id"), m_currentDocumentId},
+        {QStringLiteral("path"), path},
+    };
+    if (quality >= 0)
+        params.insert(QStringLiteral("quality"), quality);
+    dispatch(PendingKind::Save, QStringLiteral("image.save"), params, path);
+}
+
+void DocumentService::adjust(const QJsonObject &adjustments, bool preview, int maxSide) {
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        return;
+    }
+    QJsonObject params{
+        {QStringLiteral("document_id"), m_currentDocumentId},
+        {QStringLiteral("adjustments"), adjustments},
+        {QStringLiteral("preview"), preview},
+    };
+    if (maxSide >= 0)
+        params.insert(QStringLiteral("max_side"), maxSide);
+    dispatch(PendingKind::Adjust, QStringLiteral("image.adjust"), params, {}, preview);
+}
+
+void DocumentService::transform(const QString &op, const QJsonObject &params, bool preview,
+                                int maxSide) {
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        return;
+    }
+    QJsonObject request{
+        {QStringLiteral("document_id"), m_currentDocumentId},
+        {QStringLiteral("op"), op},
+        {QStringLiteral("params"), params},
+        {QStringLiteral("preview"), preview},
+    };
+    if (maxSide >= 0)
+        request.insert(QStringLiteral("max_side"), maxSide);
+    dispatch(PendingKind::Transform, QStringLiteral("image.transform"), request, {}, preview);
+}
+
+void DocumentService::undo() {
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        return;
+    }
+    dispatch(PendingKind::Undo, QStringLiteral("image.undo"),
+             QJsonObject{{QStringLiteral("document_id"), m_currentDocumentId}});
+}
+
+void DocumentService::redo() {
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        return;
+    }
+    dispatch(PendingKind::Redo, QStringLiteral("image.redo"),
+             QJsonObject{{QStringLiteral("document_id"), m_currentDocumentId}});
+}
+
+void DocumentService::reset() {
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        return;
+    }
+    dispatch(PendingKind::Reset, QStringLiteral("image.reset"),
+             QJsonObject{{QStringLiteral("document_id"), m_currentDocumentId}});
+}
+
+void DocumentService::requestHistory() {
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        return;
+    }
+    dispatch(PendingKind::History, QStringLiteral("image.history"),
+             QJsonObject{{QStringLiteral("document_id"), m_currentDocumentId}});
+}
+
+void DocumentService::onResponseReady(const QString &requestId, const QJsonObject &message) {
+    const auto pending = m_pendingByRequest.constFind(requestId);
+    if (pending == m_pendingByRequest.cend())
+        return; // 未跟踪请求（worker.hello 由 BackendManager 消费；filter.* 归他方）
+
+    const Pending context = pending.value();
+    m_pendingByRequest.erase(pending);
+
+    if (!ipc::IpcProtocol::isSuccess(message)) {
+        // 提交前同步拒绝：image.open 的 FILE_NOT_FOUND、image.adjust 的
+        // INVALID_PARAMS、image.undo 的 UNREDOABLE 等（§3.2/§3.3/§5）。
+        // 动作未落定，按失败上报（QML 在途门控的相关性依据，见信号注释）。
+        const QJsonObject error = ipc::IpcProtocol::errorOf(message);
+        emit documentError(error.value(QStringLiteral("code")).toString(),
+                           error.value(QStringLiteral("message")).toString());
+        emit documentActionFailed(context.documentId, actionId(context.kind, context.preview));
+        return;
+    }
+
+    const QJsonObject result = ipc::IpcProtocol::resultOf(message);
+    const QString taskId = result.value(QStringLiteral("task_id")).toString();
+    if (!taskId.isEmpty()) {
+        // 异步动作已受理（§2.3）：生命周期改由 taskEvent 按 task_id 关联。
+        m_pendingByTask.insert(taskId, context);
+        return;
+    }
+
+    // 同步动作（image.open / image.history）在此直接完成。
+    if (context.kind == PendingKind::Open)
+        applyOpened(context.path, result);
+    else if (context.kind == PendingKind::History)
+        emit historyReady(result);
+    else {
+        // 异步动作的成功响应必带 task_id（§2.3）；缺失视为协议违约，不伪造
+        // 受理。该动作永远不会有事件跟进，必须按未落定上报，否则在途标志
+        // 失去唯一的解除路径。
+        emit documentError(QStringLiteral("INTERNAL"),
+                           QStringLiteral("异步动作响应缺少 task_id"));
+        emit documentActionFailed(context.documentId, actionId(context.kind, context.preview));
+    }
+}
+
+void DocumentService::onTaskEvent(const QJsonObject &event) {
+    const QString type = event.value(QStringLiteral("type")).toString();
+    if (type == QStringLiteral("task.progress"))
+        return; // 进度呈现归 TaskModel；文档状态只关心终态
+
+    const QString taskId = ipc::IpcProtocol::eventTaskId(event);
+    if (taskId.isEmpty())
+        return;
+    const auto pending = m_pendingByTask.constFind(taskId);
+    if (pending == m_pendingByTask.cend())
+        return; // 未知任务（filter.* 任务、他人创建早于本服务的任务）
+
+    const Pending context = pending.value();
+    if (type == QStringLiteral("task.failed")) {
+        m_pendingByTask.erase(pending);
+        // 失败只上报不改状态；即使文档已切换也如实呈现（错误是一次性提示，
+        // 不携带文档状态，docs/ipc-protocol.md §7）。动作未落定另按提交
+        // 上下文上报（QML 在途门控的相关性依据，见信号注释）。
+        const QJsonObject error = event.value(QStringLiteral("error")).toObject();
+        emit documentError(error.value(QStringLiteral("code")).toString(),
+                           error.value(QStringLiteral("message")).toString());
+        emit documentActionFailed(context.documentId, actionId(context.kind, context.preview));
+        return;
+    }
+    if (type == QStringLiteral("task.completed")) {
+        m_pendingByTask.erase(pending);
+        handleCompleted(context, event.value(QStringLiteral("result")).toObject());
+    }
+}
+
+void DocumentService::handleCompleted(const Pending &context, const QJsonObject &result) {
+    // 陈旧任务丢弃的依据是 version 而非请求时序（总纲 §6.4 / §3.1）：提交时
+    // 记录 documentId，完成时已切换文档的结果不再触碰任何文档状态。
+    const bool stale = context.documentId != m_currentDocumentId;
+
+    switch (context.kind) {
+    case PendingKind::Save: {
+        // save 写的是目标文件，与"当前文档"无关：切换文档后完成也如实上报；
+        // 但只有保存的就是当前文档才清除未保存标记（§3.1：save 不改 version）。
+        QString savedPath = result.value(QStringLiteral("path")).toString();
+        if (savedPath.isEmpty())
+            savedPath = context.path;
+        if (!stale && m_documentModified) {
+            m_documentModified = false;
+            emit documentModifiedChanged();
+        }
+        emit documentSaved(savedPath);
+        return;
+    }
+    case PendingKind::Adjust:
+    case PendingKind::Transform:
+        if (stale)
+            return;
+        if (context.preview) {
+            // 预览不改 version / modified（§3.2：result.version 为执行时版本）。
+            emit previewReady(result);
+            return;
+        }
+        applyCompletedVersion(result, true);
+        return;
+    case PendingKind::Undo:
+    case PendingKind::Redo:
+        if (stale)
+            return;
+        applyCompletedVersion(result, true);
+        // §3.3：undo/redo/reset 完成时写一份恢复后图像的降采样预览文件
+        // "供画布立即刷新"，result 携带 path/sha256 —— 复用 previewReady 通道。
+        emit previewReady(result);
+        return;
+    case PendingKind::Reset:
+        if (stale)
+            return;
+        // §3.1：reset 同样 version += 1；但像素回到源图，modified 与 Worker
+        // 端一致地清除（image_adapter.py reset 置 modified=False）——顶栏 ●
+        // 熄灭、保存按钮禁用，与 image.metadata 的 modified 真值保持一致。
+        applyCompletedVersion(result, false);
+        emit previewReady(result);
+        return;
+    case PendingKind::Open:
+    case PendingKind::History:
+        return; // 同步动作不经事件通道，防御性忽略
+    }
+}
+
+void DocumentService::applyOpened(const QString &path, const QJsonObject &result) {
+    const QString documentId = result.value(QStringLiteral("document_id")).toString();
+    if (documentId.isEmpty()) {
+        // 成功响应必带 document_id（§3）；缺失视为协议违约，不得伪造状态。
+        emit documentError(QStringLiteral("INTERNAL"),
+                           QStringLiteral("image.open 响应缺少 document_id"));
+        return;
+    }
+    const QString previousDocumentId = m_currentDocumentId;
+    m_currentDocumentId = documentId;
+    m_documentPath = path;
+    emit currentDocumentChanged();
+    if (m_currentVersion != 0) {
+        m_currentVersion = 0; // §3.1：image.open 时 version = 0（重开新文档需复位）
+        emit documentVersionChanged(m_currentVersion);
+    }
+    if (m_documentModified) {
+        m_documentModified = false;
+        emit documentModifiedChanged();
+    }
+    emit documentOpened(documentId, path, result.value(QStringLiteral("width")).toInt(0),
+                        result.value(QStringLiteral("height")).toInt(0));
+    SettingsService::instance()->addRecentFile(path);
+    closePreviousDocument(previousDocumentId);
+}
+
+void DocumentService::closePreviousDocument(const QString &previousDocumentId) {
+    if (previousDocumentId.isEmpty() || previousDocumentId == m_currentDocumentId || !m_backend)
+        return;
+    // 旧文档仍有在途任务（含尚未回执的提交）时不关：close 会让任务体内的
+    // store.get 抛 UNKNOWN_DOCUMENT，把合法的保存/应用打成失败。被跳过的
+    // 旧文档随下次切换或 Worker 退出回收（CHANGELOG 已知限制）。
+    for (const auto &pending : m_pendingByTask) {
+        if (pending.documentId == previousDocumentId)
+            return;
+    }
+    for (const auto &pending : m_pendingByRequest) {
+        if (pending.documentId == previousDocumentId)
+            return;
+    }
+    // fire-and-forget：不登记 pending，响应（closed:true 或 UNKNOWN_DOCUMENT）
+    // 落在未跟踪帧路径被忽略；同步 close 在 Worker 主循环内顺序执行，
+    // 一定晚于刚完成的 image.open（§1：JSON Lines 顺序处理）。
+    m_backend->sendAction(QStringLiteral("image.close"),
+                          QJsonObject{{QStringLiteral("document_id"), previousDocumentId}});
+}
+
+void DocumentService::applyCompletedVersion(const QJsonObject &result, bool markModified) {
+    // §3.1：全分辨率 adjust/transform 与 undo/redo/reset 完成时 result.version
+    // 为新版本（undo/redo/reset 同样递增，与内容是否"回到旧值"无关）。
+    const int version = result.value(QStringLiteral("version")).toInt(m_currentVersion);
+    if (version != m_currentVersion) {
+        m_currentVersion = version;
+        emit documentVersionChanged(m_currentVersion);
+    }
+    // markModified=false 仅用于 reset（像素回到源图，无未保存修改，§3.3）；
+    // 值不变不发射，避免瞬时 true→false 抖动（test_document_service 锁定）。
+    if (m_documentModified != markModified) {
+        m_documentModified = markModified;
+        emit documentModifiedChanged();
+    }
+}
+
+} // namespace toolbox
