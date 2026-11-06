@@ -459,22 +459,22 @@ void TestDocumentService::filterApplyCompletedBumpsVersionWithoutPreview() {
 
     h.openDoc(1, QStringLiteral("doc-a1"), QStringLiteral("/tmp/chain.png"), 800, 600);
 
-    const QJsonArray steps{QJsonObject{
-        {QStringLiteral("filter_key"), QStringLiteral("grayscale_standard")},
-        {QStringLiteral("params"), QJsonObject{}},
-        {QStringLiteral("enabled"), true}}};
+    const QJsonArray steps{
+        QJsonObject{{QStringLiteral("filter_key"), QStringLiteral("grayscale_standard")},
+                    {QStringLiteral("params"), QJsonObject{}},
+                    {QStringLiteral("enabled"), true}}};
     h.service.applyFilters(steps, false, -1);
     QCOMPARE(h.backend.sendAction(QStringLiteral("probe")), reqId(3)); // filter.apply 消耗槽位 2
     h.acceptAsync(2, QStringLiteral("task-f1"));
     emit h.backend.taskEvent(
         completedEvent(QStringLiteral("task-f1"), QJsonObject{{QStringLiteral("version"), 1},
-                                                             {QStringLiteral("width"), 800},
-                                                             {QStringLiteral("height"), 600}}));
+                                                              {QStringLiteral("width"), 800},
+                                                              {QStringLiteral("height"), 600}}));
     QCOMPARE(h.service.currentVersion(), 1);
     QVERIFY(h.service.documentModified());
     QCOMPARE(versionChanged.count(), 1);
     QCOMPARE(modifiedChanged.count(), 1);
-    QCOMPARE(preview.count(), 0);   // filter.apply 全分辨率无像素文件（§3.1）
+    QCOMPARE(preview.count(), 0); // filter.apply 全分辨率无像素文件（§3.1）
     QCOMPARE(actionFailed.count(), 0);
 
     // 链应用后的 undo：completed result 形状与 image.undo 一致（画布刷新文件）。
@@ -841,8 +841,7 @@ void TestDocumentService::historyModelRendersCoalescedAdjustEntries() {
     QSignalSpy redoChanged(&model, &HistoryModel::canRedoChanged);
 
     const QJsonArray entries{
-        QJsonObject{{QStringLiteral("index"), 0},
-                    {QStringLiteral("name"), QStringLiteral("open")}},
+        QJsonObject{{QStringLiteral("index"), 0}, {QStringLiteral("name"), QStringLiteral("open")}},
         QJsonObject{{QStringLiteral("index"), 1},
                     {QStringLiteral("name"), QStringLiteral("image.adjust")}},
     };
