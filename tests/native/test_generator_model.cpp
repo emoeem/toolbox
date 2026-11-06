@@ -23,8 +23,8 @@ namespace {
 // 一条完整的 generate.list 条目（形状 = filter.list 条目的同构映射，见
 // studio_service.h 头注释的协议状态注记）。
 QJsonObject generatorEntry(const QString &key, const QString &name, const QString &category,
-                           const QString &categoryLabel, bool available,
-                           const QStringList &deps, const QJsonArray &params = QJsonArray{}) {
+                           const QString &categoryLabel, bool available, const QStringList &deps,
+                           const QJsonArray &params = QJsonArray{}) {
     QJsonArray depsArray;
     for (const auto &dep : deps)
         depsArray.append(dep);
@@ -121,7 +121,8 @@ void TestGeneratorModel::reloadFromParsesProtocolShape() {
     QCOMPARE(resetSpy.count(), 1);
     QCOMPARE(model.rowCount(), 2);
 
-    const auto noise = found(model, GeneratorModel::GeneratorKeyRole, QStringLiteral("perlin_noise"));
+    const auto noise =
+        found(model, GeneratorModel::GeneratorKeyRole, QStringLiteral("perlin_noise"));
     QVERIFY(noise.isValid());
     QCOMPARE(noise.data(GeneratorModel::GeneratorNameRole).toString(), QStringLiteral("柏林噪声"));
     QCOMPARE(noise.data(GeneratorModel::CategoryLabelRole).toString(), QStringLiteral("噪声"));
@@ -151,9 +152,9 @@ void TestGeneratorModel::reloadFromFallsBackToCategory() {
 
     // 缺 category_label 时回落 category 原值（同一条目至少有类别可显，
     // filter_model.cpp:23-27 的同一约定）。
-    model.reloadFrom(generatorListResult({generatorEntry(
-        QStringLiteral("brick"), QStringLiteral("砖墙"), QStringLiteral("pattern"), QString(),
-        true, {})}));
+    model.reloadFrom(
+        generatorListResult({generatorEntry(QStringLiteral("brick"), QStringLiteral("砖墙"),
+                                            QStringLiteral("pattern"), QString(), true, {})}));
     QCOMPARE(model.rowCount(), 1);
     QCOMPARE(model.index(0, 0).data(GeneratorModel::CategoryLabelRole).toString(),
              QStringLiteral("pattern"));
@@ -163,9 +164,9 @@ void TestGeneratorModel::reloadFromClearsAndReplaces() {
     GeneratorModel model;
     QAbstractItemModelTester tester(&model);
 
-    model.reloadFrom(generatorListResult({generatorEntry(
-        QStringLiteral("a"), QStringLiteral("甲"), QStringLiteral("noise"),
-        QStringLiteral("噪声"), true, {}, {})}));
+    model.reloadFrom(generatorListResult(
+        {generatorEntry(QStringLiteral("a"), QStringLiteral("甲"), QStringLiteral("noise"),
+                        QStringLiteral("噪声"), true, {}, {})}));
     QCOMPARE(model.rowCount(), 1);
 
     // 空对象 / 缺 generators 字段 = 清空（FilterModel::reloadFrom 同款语义，
@@ -177,9 +178,9 @@ void TestGeneratorModel::reloadFromClearsAndReplaces() {
     QCOMPARE(model.rowCount(), 0);
 
     // 整表替换而非追加：第二次填充后旧条目不复存在。
-    model.reloadFrom(generatorListResult({generatorEntry(
-        QStringLiteral("b"), QStringLiteral("乙"), QStringLiteral("pattern"),
-        QStringLiteral("图案"), true, {}, {})}));
+    model.reloadFrom(generatorListResult(
+        {generatorEntry(QStringLiteral("b"), QStringLiteral("乙"), QStringLiteral("pattern"),
+                        QStringLiteral("图案"), true, {}, {})}));
     QCOMPARE(model.rowCount(), 1);
     QVERIFY(!found(model, GeneratorModel::GeneratorKeyRole, QStringLiteral("a")).isValid());
     QCOMPARE(found(model, GeneratorModel::GeneratorKeyRole, QStringLiteral("b")).isValid(), true);
@@ -210,8 +211,8 @@ void TestGeneratorModel::searchMatchesTitleAndKeywords() {
          generatorEntry(QStringLiteral("gmic_texture"), QStringLiteral("G'MIC 纹理"),
                         QStringLiteral("texture"), QStringLiteral("纹理"), false,
                         {QStringLiteral("gmic")}),
-         generatorEntry(QStringLiteral("brick"), QStringLiteral("砖墙"),
-                        QStringLiteral("pattern"), QStringLiteral("图案"), true, {})}));
+         generatorEntry(QStringLiteral("brick"), QStringLiteral("砖墙"), QStringLiteral("pattern"),
+                        QStringLiteral("图案"), true, {})}));
 
     // title 匹配（显示名）。
     QCOMPARE(model.search(QStringLiteral("砖墙")).size(), 1);
@@ -239,9 +240,9 @@ void TestGeneratorModel::searchMatchesTitleAndKeywords() {
 void TestGeneratorModel::searchCaseInsensitiveAndEmptyQuery() {
     GeneratorModel model;
     QAbstractItemModelTester tester(&model);
-    model.reloadFrom(generatorListResult({generatorEntry(
-        QStringLiteral("Perlin_Noise"), QStringLiteral("柏林噪声"), QStringLiteral("noise"),
-        QStringLiteral("噪声"), true, {})}));
+    model.reloadFrom(generatorListResult(
+        {generatorEntry(QStringLiteral("Perlin_Noise"), QStringLiteral("柏林噪声"),
+                        QStringLiteral("noise"), QStringLiteral("噪声"), true, {})}));
 
     // 大小写不敏感的包含匹配。
     QCOMPARE(model.search(QStringLiteral("PERLIN")).size(), 1);
@@ -254,9 +255,9 @@ void TestGeneratorModel::searchCaseInsensitiveAndEmptyQuery() {
 void TestGeneratorModel::dataOnInvalidIndexes() {
     GeneratorModel model;
     QAbstractItemModelTester tester(&model);
-    model.reloadFrom(generatorListResult({generatorEntry(
-        QStringLiteral("perlin_noise"), QStringLiteral("柏林噪声"), QStringLiteral("noise"),
-        QStringLiteral("噪声"), true, {})}));
+    model.reloadFrom(generatorListResult(
+        {generatorEntry(QStringLiteral("perlin_noise"), QStringLiteral("柏林噪声"),
+                        QStringLiteral("noise"), QStringLiteral("噪声"), true, {})}));
     QCOMPARE(model.rowCount(), 1);
 
     // 扁平表契约（FilterModel::dataOnInvalidIndexes 同款）：负行/越界行/带父

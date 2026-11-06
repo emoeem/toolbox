@@ -257,18 +257,16 @@ void TestStudioService::loadGeneratorsFillsModel() {
     QCOMPARE(loading.count(), 2); // true → false
     QCOMPARE(errors.count(), 0);
     QCOMPARE(service.generatorModel()->rowCount(), 2);
-    QCOMPARE(service.generatorModel()
-                 ->index(0, 0)
-                 .data(GeneratorModel::GeneratorKeyRole)
-                 .toString(),
-             QStringLiteral("perlin_noise"));
+    QCOMPARE(
+        service.generatorModel()->index(0, 0).data(GeneratorModel::GeneratorKeyRole).toString(),
+        QStringLiteral("perlin_noise"));
     QCOMPARE(service.generatorModel()->index(0, 0).data(GeneratorModel::AvailableRole).toBool(),
              true);
     QCOMPARE(service.generatorModel()->index(1, 0).data(GeneratorModel::AvailableRole).toBool(),
              false);
-    QCOMPARE(service.generatorModel()->index(1, 0).data(GeneratorModel::OptionalDepsRole)
-                 .toStringList(),
-             QStringList{QStringLiteral("gmic")});
+    QCOMPARE(
+        service.generatorModel()->index(1, 0).data(GeneratorModel::OptionalDepsRole).toStringList(),
+        QStringList{QStringLiteral("gmic")});
 
     // 未跟踪帧不落 generatorModel：generate.render 的异步受理（task_id 响应）
     // 与未知 request_id 一律被 StudioService 忽略（studio_service.cpp 关联注释）。
@@ -315,10 +313,9 @@ void TestStudioService::generateListSyncRejection() {
     // 如实上报（Studio 页的错误态），模型不动。
     const int n = probeSlot(m_backend);
     service.loadGenerators();
-    emit m_backend.responseReady(
-        reqId(n + 1),
-        failedResponse(reqId(n + 1), QStringLiteral("UNKNOWN_ACTION"),
-                       QStringLiteral("未知动作: generate.list")));
+    emit m_backend.responseReady(reqId(n + 1),
+                                 failedResponse(reqId(n + 1), QStringLiteral("UNKNOWN_ACTION"),
+                                                QStringLiteral("未知动作: generate.list")));
     QCOMPARE(service.loadingGenerators(), false);
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("UNKNOWN_ACTION"));
@@ -400,7 +397,8 @@ void TestStudioService::renderAcceptanceAndCompletion() {
     QCOMPARE(accepted.count(), 1);
     QCOMPARE(accepted.at(0).at(0).toString(), QStringLiteral("task-1"));
     QCOMPARE(taskModel.rowCount(), 1);
-    QCOMPARE(taskModel.index(0, 0).data(TaskModel::NameRole).toString(), QStringLiteral("生成渲染"));
+    QCOMPARE(taskModel.index(0, 0).data(TaskModel::NameRole).toString(),
+             QStringLiteral("生成渲染"));
     QCOMPARE(taskModel.index(0, 0).data(TaskModel::StatusRole).toString(),
              QStringLiteral("queued"));
 
@@ -426,8 +424,7 @@ void TestStudioService::renderAcceptanceAndCompletion() {
             {QStringLiteral("sha256"), QStringLiteral("abc")},
         }));
     QCOMPARE(previewReady.count(), 1);
-    QCOMPARE(previewReady.at(0).at(0).toString(),
-             QStringLiteral("/tmp/toolbox-worker-1/tex.png"));
+    QCOMPARE(previewReady.at(0).at(0).toString(), QStringLiteral("/tmp/toolbox-worker-1/tex.png"));
     QCOMPARE(taskModel.index(0, 0).data(TaskModel::StatusRole).toString(),
              QStringLiteral("completed"));
     QCOMPARE(errors.count(), 0);
@@ -452,17 +449,17 @@ void TestStudioService::renderAcceptanceAndCompletion() {
     QCOMPARE(submitted3, reqId(n + 3));
     emit m_backend.responseReady(reqId(n + 3),
                                  asyncAcceptedResponse(reqId(n + 3), QStringLiteral("task-3")));
-    emit m_backend.taskEvent(completedEvent(QStringLiteral("task-3"),
-                                            QJsonObject{{QStringLiteral("width"), 128}}));
+    emit m_backend.taskEvent(
+        completedEvent(QStringLiteral("task-3"), QJsonObject{{QStringLiteral("width"), 128}}));
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("INTERNAL"));
     QCOMPARE(errors.at(0).at(1).toString(), QStringLiteral("generate.render 完成结果缺少预览图"));
     QCOMPARE(previewReady.count(), 2);
 
     // 7) 未知任务的终态帧：忽略（image.* / filter.* 任务归各自服务）。
-    emit m_backend.taskEvent(completedEvent(
-        QStringLiteral("task-ghost"),
-        QJsonObject{{QStringLiteral("path"), QStringLiteral("/tmp/ghost.png")}}));
+    emit m_backend.taskEvent(
+        completedEvent(QStringLiteral("task-ghost"),
+                       QJsonObject{{QStringLiteral("path"), QStringLiteral("/tmp/ghost.png")}}));
     QCOMPARE(previewReady.count(), 2);
     QCOMPARE(errors.count(), 1);
 }

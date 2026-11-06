@@ -56,8 +56,7 @@ void BatchModel::resetFrom(const QJsonArray &entries) {
         entry.state = object.value(QStringLiteral("state")).toString(kPendingState);
         if (entry.state.isEmpty())
             entry.state = kPendingState;
-        entry.progress =
-            qBound(0, object.value(QStringLiteral("progress")).toInt(0), 100);
+        entry.progress = qBound(0, object.value(QStringLiteral("progress")).toInt(0), 100);
         entry.error = object.value(QStringLiteral("error")).toString();
         entry.outputPath = object.value(QStringLiteral("output_path")).toString();
         next.append(entry);
@@ -152,8 +151,7 @@ int BatchModel::indexOfFile(const QString &file) const {
 }
 
 void BatchModel::maybeEmitSummary(int totalBefore, int doneBefore, int failedBefore) {
-    if (totalCount() == totalBefore && doneCount() == doneBefore &&
-        failedCount() == failedBefore)
+    if (totalCount() == totalBefore && doneCount() == doneBefore && failedCount() == failedBefore)
         return;
     emit batchSummaryChanged();
 }

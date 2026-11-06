@@ -87,7 +87,7 @@ class StudioService : public QObject {
     Q_INVOKABLE void loadGenerators();
 
     // generate.render（async，§2.3）：paramsJson 为参数值对象的 JSON 文本
-    //（如 {"seed":42,...}，与 generatorModel 的 paramsJson 角色——参数"定义"
+    // （如 {"seed":42,...}，与 generatorModel 的 paramsJson 角色——参数"定义"
     // 数组——是两种形状；本参数是 UI 装配后的"值"），空/纯空白按 {} 上送，
     // 解析失败/非对象在本地拒绝（INVALID_PARAMS，不上送）。width/height 必须
     // > 0，否则本地拒绝。

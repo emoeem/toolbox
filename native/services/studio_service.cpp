@@ -109,14 +109,13 @@ QString StudioService::render(const QString &generatorKey, const QString &params
         }
         params = parsed.object();
     }
-    const QString requestId = sendTracked(
-        PendingKind::Render, QStringLiteral("generate.render"),
-        QJsonObject{
-            {QStringLiteral("generator_key"), generatorKey},
-            {QStringLiteral("params"), params},
-            {QStringLiteral("width"), width},
-            {QStringLiteral("height"), height},
-        });
+    const QString requestId = sendTracked(PendingKind::Render, QStringLiteral("generate.render"),
+                                          QJsonObject{
+                                              {QStringLiteral("generator_key"), generatorKey},
+                                              {QStringLiteral("params"), params},
+                                              {QStringLiteral("width"), width},
+                                              {QStringLiteral("height"), height},
+                                          });
     // 任务行登记（§2.3）：TaskModel 只为 trackRequest 登记过的 request_id 建
     // 行（task_model.cpp:59-77）；不登记则渲染永远不进任务抽屉、也无法行内
     // 取消（document_service.cpp:114-123 同款）。行显示名"生成渲染"（TaskModel

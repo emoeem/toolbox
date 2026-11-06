@@ -28,12 +28,12 @@ class GeneratorModel : public QAbstractListModel {
 
   public:
     struct Entry {
-        QString key;              // 协议字段 key（generate.render 的 generator_key）
-        QString name;             // 协议字段 name（显示名，"title"）
-        QString categoryLabel;    // 协议字段 category_label（缺省回落 category 原值）
-        QString paramsJson;       // 协议字段 params 数组的紧凑 JSON 文本（参数定义）
-        bool available = false;   // 协议字段 available（缺可选依赖时 false → 置灰，
-                                  // §9.7 "G'MIC 缺失时该生成器置灰"）
+        QString key;            // 协议字段 key（generate.render 的 generator_key）
+        QString name;           // 协议字段 name（显示名，"title"）
+        QString categoryLabel;  // 协议字段 category_label（缺省回落 category 原值）
+        QString paramsJson;     // 协议字段 params 数组的紧凑 JSON 文本（参数定义）
+        bool available = false; // 协议字段 available（缺可选依赖时 false → 置灰，
+                                // §9.7 "G'MIC 缺失时该生成器置灰"）
         QStringList optionalDeps; // 协议字段 optional_deps（置灰原因，如 "gmic"）
     };
 
