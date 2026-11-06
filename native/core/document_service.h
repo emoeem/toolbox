@@ -7,13 +7,14 @@
 #include <QUrl>
 #include <QtQml/qqml.h>
 
+// TaskModel 必须完整包含：moc 生成的元类型注册代码对信号/属性里的指针类型
+// 做 sizeof（CI 实证 incomplete type），前置声明不够。注意 #include 只能放
+// 在 namespace 之外——放进 namespace 会把整个 Qt 头展开进 toolbox（CI 实证）。
+#include "models/task_model.h"
+
 namespace toolbox {
 
 class BackendManager;
-
-// TaskModel 必须完整包含：moc 生成的元类型注册代码对信号/属性里的指针类型
-// 做 sizeof（CI 实证 incomplete type），前置声明不够。
-#include "models/task_model.h"
 
 // Document-facing facade over the Worker protocol (docs/ipc-protocol.md §3):
 // one current document plus the Phase 4 edit actions. image.open / image.save
