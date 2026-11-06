@@ -23,8 +23,8 @@ class HistoryModel : public QAbstractListModel {
 
   public:
     struct Entry {
-        int index = 0;    // 协议字段 index：entries 下标，也是 histCurrent 的判定值
-        QString name;     // 产生该条目的动作名（如 "open" / "image.adjust"）
+        int index = 0; // 协议字段 index：entries 下标，也是 histCurrent 的判定值
+        QString name;  // 产生该条目的动作名（如 "open" / "image.adjust"）
     };
 
     enum Roles { HistIndexRole = Qt::UserRole + 1, HistNameRole, HistCurrentRole };

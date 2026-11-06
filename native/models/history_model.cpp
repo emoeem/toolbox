@@ -60,7 +60,9 @@ QVariant HistoryModel::data(const QModelIndex &index, int role) const {
 
 QHash<int, QByteArray> HistoryModel::roleNames() const {
     return {
-        {HistIndexRole, "histIndex"}, {HistNameRole, "histName"}, {HistCurrentRole, "histCurrent"},
+        {HistIndexRole, "histIndex"},
+        {HistNameRole, "histName"},
+        {HistCurrentRole, "histCurrent"},
     };
 }
 

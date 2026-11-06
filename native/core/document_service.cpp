@@ -254,8 +254,7 @@ void DocumentService::onResponseReady(const QString &requestId, const QJsonObjec
         // 异步动作的成功响应必带 task_id（§2.3）；缺失视为协议违约，不伪造
         // 受理。该动作永远不会有事件跟进，必须按未落定上报，否则在途标志
         // 失去唯一的解除路径。
-        emit documentError(QStringLiteral("INTERNAL"),
-                           QStringLiteral("异步动作响应缺少 task_id"));
+        emit documentError(QStringLiteral("INTERNAL"), QStringLiteral("异步动作响应缺少 task_id"));
         emit documentActionFailed(context.documentId, actionId(context.kind, context.preview));
     }
 }

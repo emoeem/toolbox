@@ -95,8 +95,7 @@ QJsonObject successResponse(const QString &requestId, const QJsonObject &result)
     };
 }
 
-QJsonObject failedResponse(const QString &requestId, const QString &code,
-                           const QString &message) {
+QJsonObject failedResponse(const QString &requestId, const QString &code, const QString &message) {
     return QJsonObject{
         {QStringLiteral("protocol"), toolbox::ipc::kProtocolVersion},
         {QStringLiteral("request_id"), requestId},
@@ -139,8 +138,8 @@ QJsonObject historyResult(int current, bool canUndo, bool canRedo) {
     const QStringList names = {QStringLiteral("open"), QStringLiteral("image.adjust"),
                                QStringLiteral("image.transform")};
     for (int i = 0; i < names.size(); ++i)
-        entries.append(QJsonObject{{QStringLiteral("index"), i},
-                                   {QStringLiteral("name"), names.at(i)}});
+        entries.append(
+            QJsonObject{{QStringLiteral("index"), i}, {QStringLiteral("name"), names.at(i)}});
     return QJsonObject{
         {QStringLiteral("entries"), entries},
         {QStringLiteral("current"), current},
@@ -245,10 +244,10 @@ void TestDocumentService::untrackedFramesAreIgnored() {
     emit h.backend.responseReady(reqId(9),
                                  openSuccessResponse(reqId(9), QStringLiteral("doc-ghost"), 1, 1));
     // 未知 task_id 的事件（filter.apply 任务、本服务创建前已存在的任务）。
-    emit h.backend.taskEvent(completedEvent(
-        QStringLiteral("task-ghost"),
-        QJsonObject{{QStringLiteral("version"), 42}, {QStringLiteral("width"), 1},
-                    {QStringLiteral("height"), 1}}));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-ghost"), QJsonObject{{QStringLiteral("version"), 42},
+                                                                 {QStringLiteral("width"), 1},
+                                                                 {QStringLiteral("height"), 1}}));
     emit h.backend.taskEvent(failedEvent(QStringLiteral("task-ghost"),
                                          QStringLiteral("ENGINE_ERROR"), QStringLiteral("x")));
     // 无 task_id 的事件帧。
@@ -291,10 +290,9 @@ void TestDocumentService::dispatchRegistersTaskModelRows() {
     QCOMPARE(model.index(0, 0).data(TaskModel::NameRole).toString(), QStringLiteral("应用调整"));
     QCOMPARE(model.index(0, 0).data(TaskModel::StatusRole).toString(), QStringLiteral("queued"));
     emit h.backend.taskEvent(
-        completedEvent(QStringLiteral("task-1"),
-                       QJsonObject{{QStringLiteral("version"), 1},
-                                   {QStringLiteral("width"), 640},
-                                   {QStringLiteral("height"), 480}}));
+        completedEvent(QStringLiteral("task-1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                             {QStringLiteral("width"), 640},
+                                                             {QStringLiteral("height"), 480}}));
     QCOMPARE(model.index(0, 0).data(TaskModel::StatusRole).toString(), QStringLiteral("completed"));
 
     // 预览任务同样入列（行内取消的唯一入口是任务行）。
@@ -309,8 +307,8 @@ void TestDocumentService::dispatchRegistersTaskModelRows() {
     QCOMPARE(model.rowCount(), 3);
     QCOMPARE(model.index(2, 0).data(TaskModel::NameRole).toString(), QStringLiteral("撤销"));
     h.service.requestHistory();
-    emit h.backend.responseReady(
-        reqId(5), successResponse(reqId(5), historyResult(0, false, false)));
+    emit h.backend.responseReady(reqId(5),
+                                 successResponse(reqId(5), historyResult(0, false, false)));
     QCOMPARE(model.rowCount(), 3);
 }
 
@@ -343,8 +341,7 @@ void TestDocumentService::openDocumentSucceedsTracksStateAndRecentFiles() {
 
     // 打开成功必须写入最近文件（SettingsService::instance()->addRecentFile）。
     QCOMPARE(recentChanged.count(), 1);
-    QCOMPARE(SettingsService::instance()->recentFiles().first(),
-             QStringLiteral("/tmp/first.png"));
+    QCOMPARE(SettingsService::instance()->recentFiles().first(), QStringLiteral("/tmp/first.png"));
 }
 
 void TestDocumentService::openDocumentFailureEmitsError() {
@@ -355,9 +352,9 @@ void TestDocumentService::openDocumentFailureEmitsError() {
     const int recentCount = SettingsService::instance()->recentFiles().size();
 
     h.service.openDocument(QUrl::fromLocalFile(QStringLiteral("/tmp/missing.png")));
-    emit h.backend.responseReady(
-        reqId(1), failedResponse(reqId(1), QStringLiteral("FILE_NOT_FOUND"),
-                                 QStringLiteral("文件不存在: /tmp/missing.png")));
+    emit h.backend.responseReady(reqId(1),
+                                 failedResponse(reqId(1), QStringLiteral("FILE_NOT_FOUND"),
+                                                QStringLiteral("文件不存在: /tmp/missing.png")));
 
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("FILE_NOT_FOUND"));
@@ -395,10 +392,9 @@ void TestDocumentService::completedUpdatesVersionAndModified() {
     h.service.adjust(QJsonObject{{QStringLiteral("brightness"), 20}}, false, -1);
     h.acceptAsync(2, QStringLiteral("task-1"));
     emit h.backend.taskEvent(
-        completedEvent(QStringLiteral("task-1"),
-                       QJsonObject{{QStringLiteral("version"), 1},
-                                   {QStringLiteral("width"), 1024},
-                                   {QStringLiteral("height"), 768}}));
+        completedEvent(QStringLiteral("task-1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                             {QStringLiteral("width"), 1024},
+                                                             {QStringLiteral("height"), 768}}));
     QCOMPARE(h.service.currentVersion(), 1);
     QVERIFY(h.service.documentModified());
     QCOMPARE(versionChanged.count(), 1);
@@ -411,10 +407,9 @@ void TestDocumentService::completedUpdatesVersionAndModified() {
                         -1);
     h.acceptAsync(3, QStringLiteral("task-2"));
     emit h.backend.taskEvent(
-        completedEvent(QStringLiteral("task-2"),
-                       QJsonObject{{QStringLiteral("version"), 2},
-                                   {QStringLiteral("width"), 768},
-                                   {QStringLiteral("height"), 1024}}));
+        completedEvent(QStringLiteral("task-2"), QJsonObject{{QStringLiteral("version"), 2},
+                                                             {QStringLiteral("width"), 768},
+                                                             {QStringLiteral("height"), 1024}}));
     QCOMPARE(h.service.currentVersion(), 2);
     QCOMPARE(versionChanged.count(), 2);
     QCOMPARE(modifiedChanged.count(), 1);
@@ -493,10 +488,10 @@ void TestDocumentService::resetCompletedCarriesVersionAndPreview() {
     // modified=False），UI 真值（● / 保存按钮）必须与 image.metadata 一致。
     h.service.adjust(QJsonObject{{QStringLiteral("brightness"), 10}}, false, -1);
     h.acceptAsync(2, QStringLiteral("task-1"));
-    emit h.backend.taskEvent(completedEvent(
-        QStringLiteral("task-1"),
-        QJsonObject{{QStringLiteral("version"), 1}, {QStringLiteral("width"), 800},
-                    {QStringLiteral("height"), 600}}));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                             {QStringLiteral("width"), 800},
+                                                             {QStringLiteral("height"), 600}}));
     QVERIFY(h.service.documentModified());
     QCOMPARE(modifiedChanged.count(), 1); // adjust 置脏
 
@@ -543,24 +538,24 @@ void TestDocumentService::saveCompletesAndClearsModified() {
     h.openDoc(1, QStringLiteral("doc-a1"), QStringLiteral("/tmp/save-src.png"), 640, 480);
     h.service.adjust(QJsonObject{{QStringLiteral("brightness"), 10}}, false, -1);
     h.acceptAsync(2, QStringLiteral("task-1"));
-    emit h.backend.taskEvent(completedEvent(
-        QStringLiteral("task-1"),
-        QJsonObject{{QStringLiteral("version"), 1}, {QStringLiteral("width"), 640},
-                    {QStringLiteral("height"), 480}}));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                             {QStringLiteral("width"), 640},
+                                                             {QStringLiteral("height"), 480}}));
     QVERIFY(h.service.documentModified());
 
     h.service.saveDocument(QStringLiteral("/tmp/out.png"), 85);
     h.acceptAsync(3, QStringLiteral("task-2"));
-    emit h.backend.taskEvent(completedEvent(
-        QStringLiteral("task-2"),
-        QJsonObject{{QStringLiteral("saved"), true},
-                    {QStringLiteral("path"), QStringLiteral("/tmp/out.png")},
-                    {QStringLiteral("file_size"), 4096}}));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-2"),
+                       QJsonObject{{QStringLiteral("saved"), true},
+                                   {QStringLiteral("path"), QStringLiteral("/tmp/out.png")},
+                                   {QStringLiteral("file_size"), 4096}}));
 
     QCOMPARE(saved.count(), 1);
     QCOMPARE(saved.at(0).at(0).toString(), QStringLiteral("/tmp/out.png"));
     QVERIFY(!h.service.documentModified());
-    QCOMPARE(modifiedChanged.count(), 2); // apply 时 true，save 后 false
+    QCOMPARE(modifiedChanged.count(), 2);    // apply 时 true，save 后 false
     QCOMPARE(h.service.currentVersion(), 1); // §3.1：save 不改 version
     QCOMPARE(versionChanged.count(), 1);
 }
@@ -577,18 +572,17 @@ void TestDocumentService::saveFailureSurfacesErrorAndKeepsModified() {
     // modified 从未置 true 的平凡通过覆盖不了它。
     h.service.adjust(QJsonObject{{QStringLiteral("brightness"), 10}}, false, -1);
     h.acceptAsync(2, QStringLiteral("task-1"));
-    emit h.backend.taskEvent(completedEvent(
-        QStringLiteral("task-1"),
-        QJsonObject{{QStringLiteral("version"), 1}, {QStringLiteral("width"), 640},
-                    {QStringLiteral("height"), 480}}));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                             {QStringLiteral("width"), 640},
+                                                             {QStringLiteral("height"), 480}}));
     QVERIFY(h.service.documentModified());
     QCOMPARE(modifiedChanged.count(), 1);
     QCOMPARE(actionFailed.count(), 0); // 成功路径不发 documentActionFailed
 
     h.service.saveDocument(QStringLiteral("/tmp/out.png"), -1);
     h.acceptAsync(3, QStringLiteral("task-2"));
-    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-2"),
-                                         QStringLiteral("ENGINE_ERROR"),
+    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-2"), QStringLiteral("ENGINE_ERROR"),
                                          QStringLiteral("编码器异常")));
 
     QCOMPARE(errors.count(), 1);
@@ -599,8 +593,8 @@ void TestDocumentService::saveFailureSurfacesErrorAndKeepsModified() {
     QCOMPARE(actionFailed.at(0).at(0).toString(), QStringLiteral("doc-a1"));
     QCOMPARE(actionFailed.at(0).at(1).toString(), QStringLiteral("image.save"));
     QCOMPARE(saved.count(), 0);
-    QVERIFY(h.service.documentModified());  // 失败后脏标记保持 true
-    QCOMPARE(modifiedChanged.count(), 1);   // 且未再发射（无先清后置的抖动）
+    QVERIFY(h.service.documentModified()); // 失败后脏标记保持 true
+    QCOMPARE(modifiedChanged.count(), 1);  // 且未再发射（无先清后置的抖动）
 }
 
 void TestDocumentService::failedTaskEmitsDocumentError() {
@@ -613,8 +607,7 @@ void TestDocumentService::failedTaskEmitsDocumentError() {
     h.openDoc(1, QStringLiteral("doc-a1"), QStringLiteral("/tmp/cancel-src.png"), 640, 480);
     h.service.adjust(QJsonObject{{QStringLiteral("brightness"), 10}}, false, -1);
     h.acceptAsync(2, QStringLiteral("task-1"));
-    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-1"),
-                                         QStringLiteral("CANCELLED"),
+    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-1"), QStringLiteral("CANCELLED"),
                                          QStringLiteral("任务已取消")));
 
     // §7：取消以 task.failed + CANCELLED 呈现，服务侧归一为 documentError；
@@ -635,8 +628,7 @@ void TestDocumentService::failedTaskEmitsDocumentError() {
     // 解锁在途的全分辨率提交（无关错误提前解锁会重开历史栈竞态窗口）。
     h.service.adjust(QJsonObject{{QStringLiteral("brightness"), 5}}, true, 512);
     h.acceptAsync(3, QStringLiteral("task-2"));
-    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-2"),
-                                         QStringLiteral("ENGINE_ERROR"),
+    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-2"), QStringLiteral("ENGINE_ERROR"),
                                          QStringLiteral("预览计算异常")));
     QCOMPARE(errors.count(), 2);
     QCOMPARE(actionFailed.count(), 2);
@@ -724,10 +716,10 @@ void TestDocumentService::staleTaskResultsDroppedAfterReopen() {
 
     // 陈旧任务的 completed：version/modified/previewReady 一律不触碰
     // （§3.1：version 是旧任务结果丢弃的依据）。
-    emit h.backend.taskEvent(completedEvent(
-        QStringLiteral("task-1"),
-        QJsonObject{{QStringLiteral("version"), 2}, {QStringLiteral("width"), 640},
-                    {QStringLiteral("height"), 480}}));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-1"), QJsonObject{{QStringLiteral("version"), 2},
+                                                             {QStringLiteral("width"), 640},
+                                                             {QStringLiteral("height"), 480}}));
     QCOMPARE(versionChanged.count(), 0);
     QCOMPARE(modifiedChanged.count(), 0);
     QCOMPARE(preview.count(), 0);
@@ -737,8 +729,7 @@ void TestDocumentService::staleTaskResultsDroppedAfterReopen() {
     // 陈旧任务的 failed：错误是文档状态之外的提示，仍然如实呈现；
     // documentActionFailed 携带提交时的旧 documentId——QML 门控据此忽略
     // 旧文档失败，不解除新文档的在途提交。
-    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-2"),
-                                         QStringLiteral("ENGINE_ERROR"),
+    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-2"), QStringLiteral("ENGINE_ERROR"),
                                          QStringLiteral("处理器执行异常")));
     QCOMPARE(errors.count(), 1);
     QCOMPARE(actionFailed.count(), 1);
@@ -765,8 +756,7 @@ void TestDocumentService::historyReadyForwardsIntoHistoryModel() {
     h.openDoc(1, QStringLiteral("doc-a1"), QStringLiteral("/tmp/hist.png"), 640, 480);
     h.service.requestHistory();
     QCOMPARE(h.backend.sendAction(QStringLiteral("probe")), reqId(3)); // history 消耗槽位 2
-    emit h.backend.responseReady(
-        reqId(2), successResponse(reqId(2), historyResult(1, true, true)));
+    emit h.backend.responseReady(reqId(2), successResponse(reqId(2), historyResult(1, true, true)));
 
     QCOMPARE(historyReady.count(), 1);
     QCOMPARE(model.rowCount(), 3);
@@ -777,8 +767,7 @@ void TestDocumentService::historyReadyForwardsIntoHistoryModel() {
 
     // 行数据：index/name/histCurrent 与 §3.3 result 一一对应。
     QCOMPARE(model.index(0, 0).data(HistoryModel::HistIndexRole).toInt(), 0);
-    QCOMPARE(model.index(0, 0).data(HistoryModel::HistNameRole).toString(),
-             QStringLiteral("open"));
+    QCOMPARE(model.index(0, 0).data(HistoryModel::HistNameRole).toString(), QStringLiteral("open"));
     QVERIFY(!model.index(0, 0).data(HistoryModel::HistCurrentRole).toBool());
     QCOMPARE(model.index(1, 0).data(HistoryModel::HistIndexRole).toInt(), 1);
     QCOMPARE(model.index(1, 0).data(HistoryModel::HistNameRole).toString(),
@@ -817,9 +806,10 @@ void TestDocumentService::historyModelRefreshParsesProtocolShape() {
 
     // current 缺失（畸形结果）：全部行不是当前态，canUndo/canRedo 兜底 false。
     model.refreshFrom(QJsonObject{
-        {QStringLiteral("entries"),
-         QJsonArray{QJsonObject{{QStringLiteral("index"), 0},
-                                {QStringLiteral("name"), QStringLiteral("open")}}},
+        {
+            QStringLiteral("entries"),
+            QJsonArray{QJsonObject{{QStringLiteral("index"), 0},
+                                   {QStringLiteral("name"), QStringLiteral("open")}}},
         },
     });
     QCOMPARE(model.rowCount(), 1);
