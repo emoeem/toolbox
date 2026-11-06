@@ -187,6 +187,7 @@ class TestDocumentService : public QObject {
     void openDocumentFailureEmitsError();
     void openDocumentRejectsNonLocalUrlLocally();
     void completedUpdatesVersionAndModified();
+    void filterApplyCompletedBumpsVersionWithoutPreview();
     void previewCompletedDoesNotTouchVersionOrModified();
     void resetCompletedCarriesVersionAndPreview();
     void saveCompletesAndClearsModified();
@@ -199,6 +200,7 @@ class TestDocumentService : public QObject {
 
     // HistoryModel（合并进同文件，任务清单允许）
     void historyReadyForwardsIntoHistoryModel();
+    void historyModelRendersCoalescedAdjustEntries();
     void historyModelRoleNamesMatchImplementation();
     void historyModelRefreshParsesProtocolShape();
     void historyModelRefreshUpdatesFlags();
@@ -442,6 +444,56 @@ void TestDocumentService::completedUpdatesVersionAndModified() {
     QVERIFY(!h.service.documentModified());
     QCOMPARE(modifiedChanged.count(), 2); // apply 时 true，重开清除
     QCOMPARE(h.service.documentPath(), QStringLiteral("/tmp/second.png"));
+}
+
+// filter.apply（全分辨率）完成路径：version += 1、modified=true、无画布刷新
+// 文件；其 undo/redo 与 image.undo 走同一 PendingKind::Undo 通道（§3.3 同一
+// completed result 形状——Worker 端历史条目参数化后协议面不变，此测试锁定
+// 消费侧契约：参数化 undo 的完成事件仍携带画布刷新文件）。
+void TestDocumentService::filterApplyCompletedBumpsVersionWithoutPreview() {
+    Harness h;
+    QSignalSpy versionChanged(&h.service, &DocumentService::documentVersionChanged);
+    QSignalSpy modifiedChanged(&h.service, &DocumentService::documentModifiedChanged);
+    QSignalSpy preview(&h.service, &DocumentService::previewReady);
+    QSignalSpy actionFailed(&h.service, &DocumentService::documentActionFailed);
+
+    h.openDoc(1, QStringLiteral("doc-a1"), QStringLiteral("/tmp/chain.png"), 800, 600);
+
+    const QJsonArray steps{QJsonObject{
+        {QStringLiteral("filter_key"), QStringLiteral("grayscale_standard")},
+        {QStringLiteral("params"), QJsonObject{}},
+        {QStringLiteral("enabled"), true}}};
+    h.service.applyFilters(steps, false, -1);
+    QCOMPARE(h.backend.sendAction(QStringLiteral("probe")), reqId(3)); // filter.apply 消耗槽位 2
+    h.acceptAsync(2, QStringLiteral("task-f1"));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-f1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                             {QStringLiteral("width"), 800},
+                                                             {QStringLiteral("height"), 600}}));
+    QCOMPARE(h.service.currentVersion(), 1);
+    QVERIFY(h.service.documentModified());
+    QCOMPARE(versionChanged.count(), 1);
+    QCOMPARE(modifiedChanged.count(), 1);
+    QCOMPARE(preview.count(), 0);   // filter.apply 全分辨率无像素文件（§3.1）
+    QCOMPARE(actionFailed.count(), 0);
+
+    // 链应用后的 undo：completed result 形状与 image.undo 一致（画布刷新文件）。
+    // 槽位 4：:467 的探针 sendAction 已无条件消耗 req-3（backend_manager.cpp:103
+    // 对任何 sendAction 都 ++m_requestCounter），undo 本身占 req-4。
+    h.service.undo();
+    h.acceptAsync(4, QStringLiteral("task-f2"));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-f2"),
+                       QJsonObject{{QStringLiteral("version"), 2},
+                                   {QStringLiteral("width"), 800},
+                                   {QStringLiteral("height"), 600},
+                                   {QStringLiteral("path"), QStringLiteral("/tmp/w/undo.png")},
+                                   {QStringLiteral("sha256"), QStringLiteral("bb")}}));
+    QCOMPARE(h.service.currentVersion(), 2);
+    QVERIFY(h.service.documentModified()); // undo 不清除 modified（§3.3）
+    QCOMPARE(preview.count(), 1);
+    QCOMPARE(preview.at(0).at(0).value<QJsonObject>().value(QStringLiteral("path")).toString(),
+             QStringLiteral("/tmp/w/undo.png"));
 }
 
 void TestDocumentService::previewCompletedDoesNotTouchVersionOrModified() {
@@ -777,6 +829,37 @@ void TestDocumentService::historyReadyForwardsIntoHistoryModel() {
     QCOMPARE(model.index(2, 0).data(HistoryModel::HistNameRole).toString(),
              QStringLiteral("image.transform"));
     QVERIFY(!model.index(2, 0).data(HistoryModel::HistCurrentRole).toBool());
+}
+
+// 滑杆命令合并（coalescing）后的 history 形状：Worker 端把连续的全分辨率
+// image.adjust 并作单条（name 仍为 image.adjust），两次应用只呈现一行。
+// HistoryModel 是纯消费者——本测试锁定合并后的条目数/行数据/旗标渲染。
+void TestDocumentService::historyModelRendersCoalescedAdjustEntries() {
+    HistoryModel model;
+    QAbstractItemModelTester tester(&model);
+    QSignalSpy undoChanged(&model, &HistoryModel::canUndoChanged);
+    QSignalSpy redoChanged(&model, &HistoryModel::canRedoChanged);
+
+    const QJsonArray entries{
+        QJsonObject{{QStringLiteral("index"), 0},
+                    {QStringLiteral("name"), QStringLiteral("open")}},
+        QJsonObject{{QStringLiteral("index"), 1},
+                    {QStringLiteral("name"), QStringLiteral("image.adjust")}},
+    };
+    model.refreshFrom(QJsonObject{{QStringLiteral("entries"), entries},
+                                  {QStringLiteral("current"), 1},
+                                  {QStringLiteral("canUndo"), true},
+                                  {QStringLiteral("canRedo"), false}});
+
+    QCOMPARE(model.rowCount(), 2); // 合并生效：两次应用仅一行（另加 open）
+    QVERIFY(model.canUndo());
+    QVERIFY(!model.canRedo());
+    QCOMPARE(undoChanged.count(), 1);
+    QCOMPARE(redoChanged.count(), 0); // false → false 不重发（实现锁定）
+    QCOMPARE(model.index(1, 0).data(HistoryModel::HistIndexRole).toInt(), 1);
+    QCOMPARE(model.index(1, 0).data(HistoryModel::HistNameRole).toString(),
+             QStringLiteral("image.adjust"));
+    QVERIFY(model.index(1, 0).data(HistoryModel::HistCurrentRole).toBool());
 }
 
 void TestDocumentService::historyModelRoleNamesMatchImplementation() {

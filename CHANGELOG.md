@@ -1,5 +1,96 @@
 # Changelog
 
+## 2026-11-07 (Phase 6+ 改进批次 — 滤镜链参数化 undo + 滑杆命令合并)
+
+依据 docs/competitive-analysis.md §4 行动项 1/2（darktable/Lightroom 参数
+管道重放思路的落地批次）：**滤镜链参数化 undo**（filter.apply 历史条目只存
+链 steps 参数，undo/redo 从基线/最近快照锚点重放链，像素快照仅保留给
+transform/crop 类"重放屏障"；内存从 O(像素×历史) 降到 O(参数)——8000×5000
+大图 undo 内存的主要出路）与**滑杆命令合并（coalescing）**（连续全分辨率
+image.adjust 与上一条同 key 历史命令并作单条）。协议形状不变（动作/参数/
+completed result/history result 全部维持原样，`protocol` 保持 `1`），仅
+Worker 内部历史策略修订，两端口径同步于 docs/ipc-protocol.md §3.3
+Phase 6+ 批次注。
+
+状态口径（总纲 §14.2）：**code_complete / static_reviewed**。本机为 Windows
+编码环境且按角色纪律未运行任何测试/构建（见下方覆盖说明与如实边界）；
+Python 侧测试随 CI `unittest discover` 执行，native 测试随 CTest 执行，
+结果以 GitHub Actions 为准。
+
+### Changed（Worker 历史运行时）
+
+- `python_worker/adapters/image_adapter.py`：历史栈条目从
+  `(动作名, 像素快照)` 元组改为 `HistoryEntry` 数据类（`name/pixels/replay`
+  三字段，pixels 与 replay 至少一个非 None；pixels=None 时 replay 必非
+  None（参数化条目）；两者并存仅限携带重放参数的快照条目（image.adjust））：
+  - 快照条目（`image.adjust`/`image.transform`）：保持 1.0 像素快照语义；
+    adjust 额外携带 `replay={'kind':'adjust','applies':[...]}` 作重放参数
+    （可无损确定性重放），使其上的链条目可以参数化；transform 类
+    `replay=None`（scale/crop 有损，重放不可靠）——重放屏障。
+  - 参数化条目（`filter.apply`）：只存 `replay={'kind':'chain','steps':<
+    协议 filters 数组深拷贝>}`，不存像素；`_push_replay_history` 推送规则
+    保证重放完整性（栈顶为不可重放快照时退化为快照条目）。
+  - `undo`/`redo` 支持混合栈：快照条目直达恢复（原语义）；参数化条目经
+    `_replay_state_before` 从基线/最近快照锚点重放（重放复用既有
+    `FilterChain` + `run_filter_chain_sync` 与 `adjust_chain`，逐位一致；
+    先算后提交——取消/失败文档状态不动）。签名新增可选
+    `(progress_cb, cancel_token)`（重放进度折算上报、重放步进边界协作取消）。
+  - 淘汰（`_trim_history`/`_evict_oldest`）：字节预算只计快照条目；弹出
+    位置之上紧邻参数化条目时整段随行（段内上方条目的重放依赖段底成员
+    参数），保持"淘汰只发生在前缀"的条目名对齐不变量；底条目为参数化时
+    无需钉桩（undo 底 = 源图基线重放，范围为空）。undo 底条目（深度淘汰
+    存在时）产生复合 redo 条目：按快照语义保存被离开状态、replay 置 None
+    （重放屏障——其上的参数化推送自动退化为快照，绝不以陈旧参数作锚点
+    重放），命名沿用 dropped_names[-1] 且 dropped_names 就地清空（命名
+    职责移至该条目）。30 条上限对两类条目统一适用（与既有 undo 深度一致）。
+  - `_push_adjust_history`（新）：coalescing——栈顶为同动作名
+    `image.adjust`、redo 栈为空时并入该条目（快照不变、重放序列追加）；
+    redo 栈非空（发生过 undo）绝不合并（否则条目内重放序列与实况像素
+    不一致）。合并条目作为锚点时按 applies 顺序逐段重放，精确复原复合
+    状态。
+  - `history()` 输出形状不变；条目名规则不变（参数化链条目仍叫
+    `filter.apply`，合并条目仍叫 `image.adjust`）。
+- `python_worker/dispatcher.py`：`_filter_apply_job` 改推参数化条目；
+  `_image_adjust_job` 全分辨率分支改走 `_push_adjust_history`；
+  `_history_restore_job` 向 restore 传 `(doc, progress_cb, cancel_token)`
+  （undo/redo/reset 三签名同步，reset 忽略之）；`import copy`（steps 深拷贝）。
+
+### 不变（协议三端核对）
+
+- C++/QML 消费侧零源码改动：DocumentService/HistoryModel 消费的协议面
+  （§3.3 result 形状、条目名、canUndo/canRedo、undo/redo 完成事件的画布
+  刷新文件）逐项不变；QML 在途门控与任务行登记路径不变。
+- 既有测试语义全部保持：`tests/test_worker_edit.py` 的 adjust/transform/
+  undo/redo/reset 往返、淘汰不变量（`test_history_trimming_*`）、
+  `filter.apply` 产生 undo 条目且 undo 回基线等断言在新实现下逐条成立。
+
+### Added（测试）
+
+- `tests/test_worker_history_parametric.py`（新文件，13 用例，进程内
+  Dispatcher + TaskRuntime(max_workers=1)，样本 64×64）：链条目含 steps
+  参数而非像素快照；链 undo 与基线逐位一致 + redo 重放逐位复原；双链 undo
+  全程无快照的基线重放路径；adjust 锚点重放；transform 屏障退化；合并
+  四态（连续合并/动作插入打断/undo 后不合并/合并条目作锚点的链 undo 逐位
+  复合复原）；预算只计快照；参数段整段淘汰的条目名对齐与重做命名；
+  确定性取消令牌（第 N 次检查点置位）覆盖重放前/重放步进边界取消，文档
+  状态不动。
+- `tests/native/test_document_service.cpp`：新增
+  `filterApplyCompletedBumpsVersionWithoutPreview`（filter.apply 完成 →
+  version+1/modified/无预览文件 + 其 undo 携带画布刷新文件——参数化 undo
+  的消费侧契约）与 `historyModelRendersCoalescedAdjustEntries`（合并后
+  history 形状的两行渲染与旗标）。
+
+### 如实边界
+
+- 重放成本：连续多条参数化链的 undo 按锚点距离重放（O(链数) 次链应用），
+  30 条上限内可控；重放进度经折算上报（45–85%），单链内部进度不再细分。
+- 合并的 key 口径：按动作名 `image.adjust` 判定（拖动会话内整段并作一条，
+  与滑杆子键无关）；跨滑杆子键的合并如需细分，待 UI 出现"逐键历史"需求
+  再评估。
+- 未运行验证：本机未执行 `unittest discover` / CTest / 任何构建（角色
+  纪律：Windows 编码代理不运行/编译/安装环境）；静态复查覆盖协议三端
+  一致性与既有测试断言逐条比对，运行结果以 CI 为准。
+
 ## 2026-11-07 (Phase 6C — 统一 Studio 工作区：生成器目录与渲染)
 
 依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 6（滤镜系统与创作工作区）

@@ -1,6 +1,7 @@
 """动作分发：请求 → 同步响应或异步任务（docs/ipc-protocol.md §3）。"""
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -285,7 +286,12 @@ class Dispatcher:
             doc = store.get(document_id)
             result_image = filter_adapter.run_chain(doc.image, chain, progress_cb, cancel_token)
             # 全分辨率变更进历史（协议 §3.3：filter.apply 也产生 undo 条目）。
-            store._push_history(doc, 'filter.apply')
+            # 参数化 undo（docs/competitive-analysis.md §4 行动项 1）：链条目只存
+            # 链参数（协议 filters 数组的深拷贝），undo 从基线/最近快照锚点重放，
+            # 不保留像素快照；栈顶是不可重放快照（transform 类）时由
+            # _push_replay_history 内部退化为快照条目（重放屏障）。
+            store._push_replay_history(doc, 'filter.apply',
+                                       {'kind': 'chain', 'steps': copy.deepcopy(steps)})
             doc.image = result_image
             doc.modified = True
             doc.version += 1  # 协议 §3.1
@@ -345,7 +351,11 @@ class Dispatcher:
                 cancel_token.raise_if_cancelled()
                 adjusted = adjust_chain(doc.image, adjustments)
                 cancel_token.raise_if_cancelled()
-                store._push_history(doc, 'image.adjust')
+                # 滑杆命令合并（coalescing，docs/competitive-analysis.md §4 行动项 2）：
+                # 与上一条同为全分辨率 image.adjust 且中间无其它动作/撤销时并作
+                # 单条历史（条目内重放序列追加本次 adjustments）；否则正常快照
+                # 推送（快照条目携带 adjustments 作重放参数）。
+                store._push_adjust_history(doc, 'image.adjust', adjustments)
                 doc.image = adjusted
                 doc.modified = True
                 doc.version += 1
@@ -396,6 +406,9 @@ class Dispatcher:
                 cancel_token.raise_if_cancelled()
                 transformed = apply_transform(doc.image, op, transform_params)
                 cancel_token.raise_if_cancelled()
+                # transform/crop 类保持像素快照且不带重放参数（scale/crop 有损，
+                # 参数重放不可靠）：该条目是参数化 undo 的"重放屏障"——其上的
+                # 滤镜链条目由 _push_replay_history 退化为快照条目（§4 行动项 1）。
                 store._push_history(doc, 'image.transform')
                 doc.image = transformed
                 doc.modified = True
@@ -485,12 +498,16 @@ def _validate_transform_params(op: str, raw: Any) -> dict[str, Any]:
 
 
 def _history_restore_job(ctx: WorkerContext, document_id: str,
-                         restore: Callable[[Document], None]) -> Callable[..., dict]:
+                         restore: Callable[..., None]) -> Callable[..., dict]:
     """image.undo / image.redo / image.reset 共用任务体（协议 §3.3）。
 
     恢复像素 → version += 1 → 写降采样预览文件（write_preview 缺省 max_side=768）。
     栈空在提交前已同步拒绝；任务体内再遇栈空（并发竞态）会抛
     WorkerError(UNREDOABLE)，由任务运行时归一为失败事件，不会谎报成功。
+    restore 收到 (doc, progress_cb, cancel_token)：快照恢复直达；参数化条目
+    （滤镜链）在恢复体内从基线/锚点重放（image_adapter.undo/redo），进度折算
+    上报、协作取消在重放步进边界生效，取消/失败时文档状态不动
+    （compute-before-commit，image_adapter.HistoryMixin.undo 注）。
     """
     store = ctx.store
     temp_dir = ctx.temp_dir
@@ -499,7 +516,7 @@ def _history_restore_job(ctx: WorkerContext, document_id: str,
         doc = store.get(document_id)
         progress_cb(30, '恢复像素')
         cancel_token.raise_if_cancelled()
-        restore(doc)
+        restore(doc, progress_cb, cancel_token)
         doc.version += 1  # 协议 §3.1：undo/redo/reset 同样递增
         progress_cb(85, '写入预览文件')
         info = filter_adapter.write_preview(doc.image, temp_dir, document_id)

@@ -305,6 +305,50 @@ QML 参数面板（AppFilterParameterGroup）对 color 类型发送 hex 文本�
   canRedo}`，`index` 即 `entries` 下标。C++ 端以此驱动 HistoryModel 与
   撤销/重做按钮启停（ui-page-spec.md §2）。
 
+Phase 6+ 改进批次（2026-11-07，docs/competitive-analysis.md §4 行动项 1/2 落地）
+对本节的两点 Worker 内部策略修订——**协议形状不变**（动作、参数、completed
+result、history result 均与上文一致，`protocol` 保持 `1`），仅可观测行为
+按下列口径变化，两端实现与测试已同步（Worker 侧
+`python_worker/adapters/image_adapter.py` HistoryMixin，测试锁为
+`tests/test_worker_history_parametric.py`；C++ 侧无源码改动，消费侧契约
+锁为 `tests/native/test_document_service.cpp`）：
+
+1. **滤镜链参数化 undo**：`filter.apply` 的历史条目只存链 steps 参数
+   （协议 `filters` 数组的深拷贝），不保留像素快照；`image.undo` 对参数化
+   条目从重放基线（源图 open 态）或最近的快照锚点重放链复原像素，重放
+   复用与原应用同一条运行路径（`FilterChain` + `run_filter_chain_sync`），
+   确定性逐位一致。像素快照仅保留给不可参数化操作（`image.transform` /
+   crop 类，scale/crop 有损、参数重放不可靠——"重放屏障"；其上的链条目
+   退化为快照条目）。全分辨率 `image.adjust` 条目仍是快照条目，但额外
+   携带 adjustments 作重放参数（可无损确定性重放），使其上的链条目可以
+   参数化。内存从 O(像素×历史) 降到 O(参数)（8000×5000 大图 undo 的主要
+   出路）；字节预算（§3.3 上文，512MB）只计快照条目。对协议的可见影响：
+   - `image.history` 的条目名不变（参数化链条目仍叫 `filter.apply`），
+     条目数与可达状态的对齐规则不变（含深度淘汰 `dropped_names` 机制；
+     淘汰弹出参数化条目时其所在参数段整段随行，保证重放参数完整）。
+   - 参数化条目的 undo/redo 完成事件仍是上文同一 completed result 形状
+     （`version/width/height/path/sha256`，画布刷新文件照常写入）。
+   - 重放为确定性重算：重放中途取消（§7）或失败（如可选依赖在会话中
+     消失导致 `ENGINE_ERROR`）时文档状态不动（先算后提交），不产生半途
+     历史栈。
+2. **滑杆命令合并（coalescing）**：全分辨率 `image.adjust` 应用时，若上一
+   条历史条目同为 `image.adjust` 且其上无其它动作、redo 栈为空，则**并作
+   单条**：不新增条目，本次 adjustments 追加进该条目的重放序列，undo 一次
+   越过两次应用回到首个 adjust 之前的像素，redo 按快照像素精确复原合并后
+   状态。合并判定以 redo 栈为准（实现口径 `not redo_stack`）：redo 栈非空
+   ——栈顶条目之后发生过尚未被 redo 抵消的 undo——时不合并；undo 后又
+   redo 的序列 redo 栈已空，恢复合并（redo 恢复的正是条目快照的前态，
+   applies 重放与实况一致）。对协议的可见影响：连续 adjust 的
+   `image.history` 条目数少于应用次数（名字仍为 `image.adjust`）；
+   `version` 语义不变（每次全分辨率应用照常 +1，§3.1——version 不是内容
+   指纹）。有其它动作（transform/filter.apply）插入时同样不合并，条目数与
+   应用次数一致。HistoryModel（C++）为纯消费者，无需感知合并。
+
+并发口径（现状如实记录）：Worker 不做 per-document 串行化（`DocumentStore`
+的锁只护文档 id 表，任务线程池内同一文档的两个任务可交叠）；同一
+`document_id` 的变更类任务由客户端保证不并发提交——C++/QML 侧的在途门控
+已保证 UI 流程满足这一点，协议层不另行强制。
+
 ### 3.4 滤镜链预设（filter.presets.*，Phase 5 增补）
 
 四个 sync 动作，为 `processors/filter_presets.py` 既有持久化的协议化薄封装；
