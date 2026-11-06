@@ -23,6 +23,22 @@ def version() -> str:
     return m.group(1) if m else "unknown"
 
 
+def check() -> dict:
+    """可用性探测（docs/ipc-protocol.md §3.6 gmic.check）：不可用不抛错。
+
+    优先 CLI（available/version），其次 python-gmic 绑定（__version__ 缺失
+    时如实记 unknown）。依赖缺失是诊断结果而非协议错误。
+    """
+    if available():
+        return {'available': True, 'version': version(), 'source': 'cli'}
+    try:
+        import gmic  # noqa: F401
+    except Exception:
+        return {'available': False, 'version': '', 'source': None}
+    ver = str(getattr(gmic, '__version__', '') or '')
+    return {'available': True, 'version': ver or 'unknown', 'source': 'python'}
+
+
 def apply(input_path: str, output_path: str, command: str, cancel_token: CancelToken | None = None) -> str:
     if not available():
         raise RuntimeError("未找到 G'MIC，请安装 gmic")

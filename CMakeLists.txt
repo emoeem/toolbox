@@ -35,6 +35,11 @@ qt_add_executable(toolbox
     # Phase 5: 滤镜页服务（目录/链/预设 facade）
     native/services/filter_service.h
     native/services/filter_service.cpp
+    # Phase 6: 批量处理模型与服务（总纲 §9.4 批量工作区，BatchPage 数据源）
+    native/models/batch_model.h
+    native/models/batch_model.cpp
+    native/services/batch_service.h
+    native/services/batch_service.cpp
     # Phase 4: 文档服务（编辑器状态 facade）与撤销历史模型
     native/core/document_service.h
     native/core/document_service.cpp
@@ -65,12 +70,14 @@ target_include_directories(toolbox PRIVATE
     ${CMAKE_SOURCE_DIR}/native/graphics
 )
 
-# QML 模块登记：与 ui/ 下的实际文件一一对应（ui/components/ 28 个基础/布局/业务
+# QML 模块登记：与 ui/ 下的实际文件一一对应（ui/components/ 29 个基础/布局/业务
 # 组件 + Main + Theme 单例 + 8 个页面），qt_add_qml_module 按此清单编译进
 # qrc:/Toolbox 模块；新增 .qml 必须同步登记，否则类型解析失败。
 set(QML_FILES
     ui/Main.qml
     ui/themes/Theme.qml
+    # Phase 6 第 7 项：批量处理向导（BatchPage 工作流组件）
+    ui/components/AppBatchWizard.qml
     ui/components/AppButton.qml
     ui/components/AppColorField.qml
     ui/components/AppContextMenu.qml

@@ -1,5 +1,122 @@
 # Changelog
 
+## 2026-11-07 (Phase 6B — Batch Processing)
+
+依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 6（滤镜系统与创作工作区）
+迁移顺序的第 7 项 Batch Processing，交付批量处理的协议化垂直切片：
+`batch.start` / `batch.cancel`（ipc-protocol.md §3.5）与 `gmic.check`（§3.6）
+三动作、C++ BatchService/BatchModel 消费侧、QML AppBatchWizard + BatchPage
+导航接线（文件/目录导入 → 纯转换或滤镜链预设 → 输出设置 → 进度/取消 →
+items 对账）。复用 1.0 资产不重写：`processors/batch_filter_chain.py`
+（逐文件 load → 链 → save 与逐项记账，本批仅补 `quality` / `output_name_fn`
+两个可选参数，既有调用方行为逐字节不变）、`processors/batch.py` pattern
+占位符语义、`processors/cancellation.py` CancelToken、`processors/gmic.py`
+CLI 探测。第 6 项 G'MIC 库本体仍不在本批（迁移矩阵 §2 收敛批次），随批交付
+的只有 `gmic.check` 诊断动作与既有的依赖置灰路径；各 Studio 亦不在本批。
+状态口径（总纲 §14.2）：本批全部为 **code_complete / static_reviewed**；
+Linux 目标环境验收清单见 `docs/phase6b-acceptance.md`（批处理端到端 / G'MIC
+不可用置灰路径 / 非模态与恢复 / 大目录，实机项与 CI 已覆盖项分列），未执行
+任何目标环境运行验证；迁移矩阵 §4 批处理行按其状态取值规则保持 **待迁移**
+（ui-migration-matrix.md 头部与 Phase 6B 进度备注）。
+
+> **CI 覆盖说明**：逻辑层验证已就位，随既有 CI 机制纳入执行——test job 的
+> `unittest discover` 纳入 `tests/test_worker_batch.py`（29 用例：目录扫描
+> 去重与扩展名过滤、命名三态与 pattern 占位符、纯转换与滤镜链批次、单文件
+> 失败不中断、逐文件进度帧 + items 全量对账、取消全路径、提交前同步
+> INVALID_PARAMS 全参数面、gmic.check 四路径 mock；其中 7 组覆盖缺口为本批
+> 核对后补齐——失败隔离、format 小写 UI 契约、quality 透传、显式不支持
+> 扩展名、quality 非整数/布尔、空白路径元素、steps 元素非 dict/params 非
+> dict）；native job 的 CTest 新注册 `batch_model`（8 用例）、
+> `batch_service`（11 用例）两目标。协议复查修正一处实现缺口：
+> `batch.start` 受理回执文档/测试约定 `{task_id, total}` 而实现只回
+> `{task_id, status}`，本批在 `python_worker/dispatcher.py` 补齐（
+> `job.accepted_extra` 机制），文档同步为 `{task_id, status, total}`。
+> 截至本条目撰写 Phase 6B 改动尚未提交推送，推送后实际运行结果以
+> GitHub Actions 为准；跨进程链路（QProcess + JSON Lines + 真实文件系统
+> 批量读写）、GUI 交互（对话框/任务表/Toast/导航恢复）与真实 gmic CLI
+> 探测不在 CI 覆盖内，必须实机（docs/phase6b-acceptance.md §2-§5）。
+
+### Added（协议与 Worker）
+
+- `docs/ipc-protocol.md`：§3 新增 `batch.start` / `batch.cancel` /
+  `gmic.check` 三动作行 + §3.5（批处理参数、逐文件进度帧字段表、items
+  全量对账、取消收尾）与 §3.6（可用性探测，不可用不抛错）；§2.3 允许任务
+  事件与受理响应携带动作特有增补字段。纯新增，`protocol` 保持 `1`
+  （§8 兼容性规则）。Phase 6B 复查注：受理回执字段集修正为
+  `{task_id, status, total}`，并如实记录 `batch.cancel` / `gmic.check`
+  暂无 C++ 调用方（取消经 `task.cancel` 同语义转发；置灰路径消费
+  `filter.list` 的 available/optional_deps）。
+- `python_worker/adapters/batch_adapter.py`（新文件）：`build_batch_plan`
+  提交前同步校验（paths 扫描/去重/排序、format 大小写不敏感 + JPEG→.jpg
+  规范化、quality 1-100、naming 三态与 pattern 占位符、steps 经
+  FilterStep.from_dict + validate_all——先例同 filter.preview 链校验，
+  非法即错误响应、不产生 task_id）；`run_batch_plan` 任务体逐项执行 +
+  逐文件进度帧（file/state/progress/output_path 行字段 + done/total/
+  current 聚合字段，取消条目不发帧）+ items 全量对账；单文件失败不中断
+  批处理；取消经 CancelToken 协作检查点归一 `task.failed(CANCELLED)`。
+- `python_worker/dispatcher.py`：动作表新增三动作；`_batch_start_job`
+  经 `job.accepted_extra` 在受理回执并入 `total`（§3.5
+  `{task_id, status, total}`）；`_batch_cancel` 复用 TaskRuntime 取消
+  通道（已终结如实 `cancelled:false` 不谎报、未知 task_id
+  `UNKNOWN_TASK`）；`_gmic_check` 纯接线 `processors/gmic.py check`。
+
+### Added（C++ 服务与模型）
+
+- `native/models/batch_model.{h,cpp}`：批处理文件行模型（pending|running|
+  done|failed|skipped 行状态词汇；batchFile/batchState/batchProgress/
+  batchError/batchOutputPath 角色 + totalCount/doneCount/failedCount 计数
+  经同一 batchSummaryChanged 通知）；装填入口 resetFrom（受理整表重建）、
+  增量入口 updateFrom（逐文件帧按 file 行键"存在才更新"，未知 file 不造
+  行）、markActiveAs（C++ 专用：取消后残余 pending|running 行收尾
+  skipped——Worker 不发 skipped 词汇）、clear。
+- `native/services/batch_service.{h,cpp}`：批量页 facade（QML 单例，持有
+  batchModel）：startBatch 本地拒绝（空 paths/空输出目录/未绑定后端 →
+  恰好一次 batchError、不上送）、tracked dispatch 关联受理响应（整表
+  重建 pending 行 + batchStarted(taskId)）、task_id 关联批次事件（单活动
+  批次，迟到事件按 task_id 忽略）、completed items 整表刷新、CANCELLED
+  失败清扫 skipped、cancelBatch 提交号→task_id 翻译（经 `task.cancel`
+  转发）。QML 不 sendAction。
+- `CMakeLists.txt`：编入 batch_model / batch_service 源文件与
+  AppBatchWizard.qml。
+
+### Added（QML 批量页）
+
+- `ui/components/AppBatchWizard.qml`（新文件）：批量向导自足组件——添加
+  文件/目录（FileDialog/FolderDialog，目录原样上送由 Worker 递归展开）、
+  输出设置（目录/格式/质量（仅 JPEG/WebP）/命名三态 + pattern 必填门）、
+  滤镜链经预设选择（loadPreset 前后用 Instantiator 探针快照还原编辑器
+  链，不静默改写编辑页签状态）、运行态配置锁定与取消、批次明细行
+  （状态色点/进度/输出路径/失败展开复制）、总进度与计数、Worker 未就绪
+  降级横幅、诚实恢复语义（重进页面按审查态呈现 + "无取消句柄"提示）。
+- `ui/pages/BatchPage.qml`：一级导航"批量"宿主页面（AppBatchWizard 自足，
+  页面无状态）；`native/app/application.cpp` navModel "batch" 路由 +
+  `ui/Main.qml` Loader 接线。
+
+### Added（测试）
+
+- `tests/test_worker_batch.py`（新文件，29 用例，进程内 Dispatcher +
+  TaskRuntime，PIL 现场生成小图，gmic.check mock 不依赖真实环境）：见
+  顶部 CI 覆盖说明；本批覆盖缺口核对后补齐 7 组用例（失败隔离、format
+  小写、quality 透传、显式不支持扩展名、quality 非整数/布尔、空白路径
+  元素、steps 元素非 dict/params 非 dict）。
+- `tests/native/test_batch_model.cpp`（新文件，8 用例，
+  QAbstractItemModelTester）与 `tests/native/test_batch_service.cpp`
+  （新文件，11 用例，信号模拟不启动 Worker）：见顶部 CI 覆盖说明；
+  C++ 测试以合成协议帧锁定 §2.3/§7 生命周期契约（真实跨进程归实机验收）。
+
+### 已知限制（如实记录）
+
+- 目录条目在批次明细中只有一行，逐文件进度帧行键与之不匹配 → 目录批次
+  运行期间行不翻转、总进度条不动，完成时 items 对账整表刷新
+  （phase6b-acceptance.md §6）。
+- 批处理不在任务抽屉（BatchService 不登记 TaskModel），取消入口仅批量页
+  [取消]；离开页面后完成/失败无全局 Toast。
+- ui-page-spec §3 的 [打开输出目录] 与 [失败重试] 未实现（batchFinished
+  信号已预留入口；协议无单文件重试动作）；覆盖策略固定为覆盖（协议不
+  暴露 overwrite 参数，与 1.0 面板缺省一致）。
+- `batch.cancel` / `gmic.check` 暂无 C++ 调用方（取消经 `task.cancel`
+  同语义转发；gmic.check 为设置页"外部依赖"分组的规划数据源）。
+
 ## 2026-11-07 (Phase 6A — 滤镜系统)
 
 依据总纲 `docs/toolbox-2.0-project-plan.md` §7 Phase 6（滤镜系统与创作工作区）

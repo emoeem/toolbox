@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -45,7 +46,16 @@ def run_batch_filter_chain(
     progress_cb=None,
     cancel_token: CancelToken | None = None,
     overwrite: bool = True,
+    quality: int | None = None,
+    output_name_fn: Callable[[Path, int], str] | None = None,
 ) -> BatchFilterChainResult:
+    """逐文件 load → 滤镜链 → save（1.0 批量面板引擎，app/main_window.py 复用）。
+
+    quality / output_name_fn 为 Worker 批处理协议（docs/ipc-protocol.md §3.5）
+    增补的可选参数，缺省值保持既有调用方（main_window.py）行为逐字节不变：
+    quality=None 透传 save_image 自身缺省；output_name_fn=None 沿用
+    `stem + "." + 输出扩展名` 的既有命名（JPEG→jpg 规范化）。
+    """
     from time import monotonic
     result = BatchFilterChainResult()
     paths = [Path(f) for f in files]
@@ -73,14 +83,20 @@ def run_batch_filter_chain(
             img = ensure_rgb(img)
             processed = chain.apply(img, cancel_token=cancel_token)
             if out is not None:
-                out_name = src.stem + "." + output_format.lower().replace("jpeg", "jpg")
+                if output_name_fn is not None:
+                    out_name = output_name_fn(src, i)
+                else:
+                    out_name = src.stem + "." + output_format.lower().replace("jpeg", "jpg")
                 out_path = out / out_name
                 if out_path.exists() and not overwrite:
                     item.status = BatchItemStatus.FAILED
                     item.error = f"输出已存在且 overwrite=False: {out_path}"
                     result.failed += 1
                 else:
-                    save_image(processed, str(out_path))
+                    if quality is not None:
+                        save_image(processed, str(out_path), quality=quality)
+                    else:
+                        save_image(processed, str(out_path))
                     item.output = out_path
                     item.status = BatchItemStatus.SUCCEEDED
                     result.succeeded += 1

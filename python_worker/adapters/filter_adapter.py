@@ -122,6 +122,17 @@ def chain_fingerprint(steps: list[dict[str, Any]]) -> str:
     ).hexdigest()[:16]
 
 
+def check_gmic() -> dict[str, Any]:
+    """gmic.check（docs/ipc-protocol.md §3.6）：G'MIC 依赖可用性如实探测。
+
+    探测逻辑在 1.0 资产 processors/gmic.py 的 check()（优先 CLI，其次
+    python-gmic 绑定；都不可用返回 available=False，不抛错）；本层只做接线
+    ——适配层是唯一允许 import processors 的地方（adapters/__init__.py）。
+    """
+    from processors import gmic
+    return gmic.check()
+
+
 # ---- 滤镜链预设（docs/ipc-protocol.md §3.4）--------------------------------
 #
 # processors/filter_presets.py 是既有资产：存储路径（缺省

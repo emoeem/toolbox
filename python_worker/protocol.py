@@ -81,14 +81,21 @@ def make_error(request_id: str, code: str, message: str,
     })
 
 
-def make_progress(task_id: str, progress: int, message: str = '') -> dict[str, Any]:
-    return {
+def make_progress(task_id: str, progress: int, message: str = '',
+                  extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """task.progress 事件（§2.3）。extra 为动作特有增补字段（如批处理的
+    done/total/current/state，docs/ipc-protocol.md §3.5）；消费方必须忽略
+    未知字段，故纯新增、既有动作不传 extra 时消息形状逐字节不变。"""
+    msg: dict[str, Any] = {
         'protocol': PROTOCOL_VERSION,
         'type': 'task.progress',
         'task_id': task_id,
         'progress': max(0, min(100, int(progress))),
         'message': message,
     }
+    if extra:
+        msg.update(extra)
+    return msg
 
 
 def make_task_completed(task_id: str, result: dict | None = None) -> dict[str, Any]:

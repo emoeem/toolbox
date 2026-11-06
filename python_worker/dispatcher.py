@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import protocol
-from .adapters import filter_adapter
+from .adapters import batch_adapter, filter_adapter
 from .adapters.image_adapter import (ADJUST_KEYS, TRANSFORM_REQUIRED_PARAMS, Document, DocumentStore,
                                      WorkerError, adjust_chain, apply_transform)
 from .task_runtime import TaskRuntime
@@ -49,6 +49,8 @@ class Dispatcher:
             'filter.presets.delete': self._filter_presets_delete,
             'task.cancel': self._task_cancel,
             'task.query': self._task_query,
+            'batch.cancel': self._batch_cancel,
+            'gmic.check': self._gmic_check,
         }
         self._async: dict[str, Callable[[dict], Callable[..., dict]]] = {
             'image.save': self._image_save_job,
@@ -59,6 +61,7 @@ class Dispatcher:
             'image.reset': self._image_reset_job,
             'filter.preview': self._filter_preview_job,
             'filter.apply': self._filter_apply_job,
+            'batch.start': self._batch_start_job,
         }
         self._shutting_down = False
 
@@ -83,6 +86,12 @@ class Dispatcher:
             try:
                 job = job_factory(params)
                 result = self.ctx.ensure_runtime().submit(action, job)
+                # 受理回执附加字段：异步任务工厂可在 job 上挂 accepted_extra
+                #（目前仅 batch.start 的 total，协议 §3.5 同步响应 {task_id,
+                # status, total}）；其余动作无此属性，受理形状不变（§2.3）。
+                accepted = getattr(job, 'accepted_extra', None)
+                if accepted:
+                    result = {**result, **accepted}
                 return protocol.make_response(request['request_id'], True, result)
             except WorkerError as exc:
                 return protocol.make_error(request['request_id'], exc.code, exc.message, exc.details)
@@ -194,6 +203,20 @@ class Dispatcher:
             raise WorkerError(protocol.ERR_UNKNOWN_TASK, f'任务不存在: {params.get("task_id")}')
         return result
 
+    # ---- 批处理与依赖诊断（docs/ipc-protocol.md §3.5/§3.6）--------------------
+    def _batch_cancel(self, params: dict) -> dict[str, Any]:
+        """batch.cancel：语义同 task.cancel（复用 CancelToken），结果形状按
+        §3.5 为 {cancelled}；已终结任务如实返回 cancelled=false，不谎报。"""
+        result = self.ctx.ensure_runtime().cancel(_require(params, 'task_id'))
+        if result is None:
+            raise WorkerError(protocol.ERR_UNKNOWN_TASK, f'任务不存在: {params.get("task_id")}')
+        return {'cancelled': bool(result.get('cancelling'))}
+
+    def _gmic_check(self, _params: dict) -> dict[str, Any]:
+        # 可用性如实返回（§3.6）；探测在适配层接线到 processors.gmic.check，
+        # dispatcher 保持引擎无关（adapters/__init__.py 的分层规则）。
+        return filter_adapter.check_gmic()
+
     # ---- 异步任务工厂（返回 fn(progress_cb, cancel_token)）-------------------
     def _image_save_job(self, params: dict) -> Callable[..., dict]:
         document_id = _require(params, 'document_id')
@@ -246,6 +269,22 @@ class Dispatcher:
                     'height': int(result_image.shape[0]),
                     'version': doc.version}
 
+        return job
+
+    # ---- 批处理（docs/ipc-protocol.md §3.5，复用 processors 1.0 批处理资产）----
+    def _batch_start_job(self, params: dict) -> Callable[..., dict]:
+        # 参数形状/路径扫描/链校验在提交前同步完成（§3.5；先例同 filter.preview
+        # 与 image.transform 的提交前判定），非法即错误响应、不产生 task_id。
+        plan = batch_adapter.build_batch_plan(params)
+
+        def job(progress_cb, cancel_token) -> dict:
+            return batch_adapter.run_batch_plan(plan, progress_cb, cancel_token)
+
+        # §3.5 同步响应 {task_id, status, total}：total 为扫描所得文件数，与
+        # 完成事件 result.total 同源（同一 plan.files）。handle 把 accepted_extra
+        # 并入 TaskRuntime.submit 的受理回执（task_id/status 之外的纯新增字段，
+        # 消费方按 §2.3 忽略未知字段——C++ BatchService 只读 task_id）。
+        job.accepted_extra = {'total': len(plan.files)}
         return job
 
     # ---- image.adjust / image.transform / 历史恢复（docs/ipc-protocol.md §3.1-§3.3）----

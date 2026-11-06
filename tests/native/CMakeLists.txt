@@ -178,3 +178,41 @@ target_sources(test_filter_service PRIVATE
 target_include_directories(test_filter_service PRIVATE
     ${CMAKE_SOURCE_DIR}/native
 )
+
+# BatchModel：纯数据模型（不连 BackendManager），填充经 Q_INVOKABLE
+#（resetFrom / updateFrom / clear），测试直接构造即可；同 test_filter_model
+# 模式。QAbstractItemModelTester 需 Qt6::Test，QML_ELEMENT 元类型需 Qt6::Qml。
+qt_add_executable(test_batch_model test_batch_model.cpp)
+target_link_libraries(test_batch_model PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME batch_model COMMAND test_batch_model)
+target_sources(test_batch_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/models/batch_model.cpp
+)
+target_include_directories(test_batch_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)
+
+# BatchService：消费 BackendManager 信号（测试直接发射，同 test_task_model /
+# test_filter_service 模式），batch_model 与 backend/（BackendManager +
+# PythonWorker + 协议编码器）源一并编入；QML 单例工厂需 Qt6::Qml。
+qt_add_executable(test_batch_service test_batch_service.cpp)
+target_link_libraries(test_batch_service PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME batch_service COMMAND test_batch_service)
+target_sources(test_batch_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native/services/batch_service.cpp
+    ${CMAKE_SOURCE_DIR}/native/models/batch_model.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/python_worker.cpp
+    ${CMAKE_SOURCE_DIR}/native/backend/ipc_protocol.cpp
+)
+target_include_directories(test_batch_service PRIVATE
+    ${CMAKE_SOURCE_DIR}/native
+)

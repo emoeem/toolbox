@@ -28,6 +28,17 @@
 > 预览缓存（流程 2"缓存 key = 链参数指纹"）与链拖拽排序未实现，见
 > CHANGELOG Phase 6A 已知限制。
 
+> **Phase 6B 进度备注（2026-11-07）**：批量处理垂直切片（文件/目录导入 →
+> 纯格式转换或滤镜链预设 → 输出设置 → 进度/取消 → 逐文件对账）已在
+> `phase5-core-editing` 分支实现（协议 batch.start/batch.cancel/gmic.check +
+> C++ BatchService/BatchModel + QML AppBatchWizard/BatchPage），状态口径
+> `code_complete / static_reviewed`（CHANGELOG Phase 6B 条目）。按头部规则
+> §4 相关行状态仍为 **`待迁移`**，括注仅为进度说明；实机验收清单见
+> docs/phase6b-acceptance.md，通过后统一改判 `已迁移` 并回填验收记录。
+> 该批不含：批量重命名独立 UI（仅其 pattern 占位符语义被批处理命名复用）、
+> 智能缩放、覆盖开关 UI（协议固定覆盖）、"打开输出目录"/"失败重试"
+> 按钮、G'MIC 库本体（§2 行不变）。
+
 ## 0. 全局功能（不属于单一工具）
 
 | 现有功能 | 旧入口 | Phase | 状态 |
@@ -89,8 +100,8 @@
 
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
-| 批量处理（目录扫描/滤镜链或转换/覆盖开关） | `2963` | `batch_filter_chain.run_batch_filter_chain`（含取消） | — | 5（Batch） | 待迁移 |
-| 批量重命名（模板/预览/执行） | `3298` | `parity.batch_rename/apply_batch_rename`（`processors/batch.py:101` 未接 UI） | — | 5（Batch） | 待迁移 |
+| 批量处理（目录扫描/滤镜链或转换/覆盖开关） | `2963` | `batch_filter_chain.run_batch_filter_chain`（含取消） | — | 5（Batch） | 待迁移（Phase 6B 已实现批量向导：目录递归扫描、纯转换/滤镜链预设、命名三态、进度/取消/逐文件对账——覆盖开关未暴露（协议固定覆盖）、打开输出目录与失败重试未实现，待实机验收） |
+| 批量重命名（模板/预览/执行） | `3298` | `parity.batch_rename/apply_batch_rename`（`processors/batch.py:101` 未接 UI） | — | 5（Batch） | 待迁移（独立重命名 UI 未迁移；其 pattern 占位符语义被 Phase 6B 批处理命名 pattern 复用） |
 | 智能缩放（25 平台预设/自定义/按 KB） | `3139` | `batch.SOCIAL_PRESETS/smart_resize_by_size/resize_to_weight` | Pillow | 5（Batch） | 待迁移 |
 
 ## 5. 图像分析（Phase 6）

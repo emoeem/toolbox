@@ -90,6 +90,11 @@ Worker 启动参数：
 状态机（总纲 §6.4）：`queued → running → completed | failed`；
 `queued|running → cancelling → cancelled`。
 
+动作可在 `task.progress` 事件上附加该动作特有的字段（当前仅批处理任务，
+见 §3.5）；受理响应的 `result` 同样可携带动作特有字段（当前仅 `batch.start`
+的 `total`，§3.5）。消费方按既有字段解析，必须忽略未知字段。终态仍只由
+`task.completed` / `task.failed` 表达，progress 事件永不改变状态机。
+
 全分辨率变更类动作（规则见 §3.1）的 `task.completed` 事件 `result` 一律携带
 `version`（文档版本；`preview=true` 的 `image.*` 任务同样携带 `version`，但为
 执行时的当前版本——与预览所据像素一致，不递增；`filter.preview` 的 `result`
@@ -138,6 +143,9 @@ Worker 启动参数：
 | `image.history` | sync | `{document_id}` | `{entries: [{index, name}], current, canUndo, canRedo}`（§3.3） |
 | `task.cancel` | sync | `{task_id}` | `{cancelling: true}` |
 | `task.query` | sync | `{task_id}` | `{task_id, status, progress}` |
+| `batch.start` | async | `{paths, output_dir, format, quality?, naming?, pattern?, steps?}` | `{task_id, status, total}`（受理回执；进度/终态事件增补批处理字段，§3.5） |
+| `batch.cancel` | sync | `{task_id}` | `{cancelled}`（§3.5） |
+| `gmic.check` | sync | `{}` | `{available, version, source}`（§3.6） |
 
 动作集合按阶段扩展（总纲 §6.2）；禁止各页面私自定义协议动作。
 
@@ -154,6 +162,34 @@ save / load / delete` 四个 sync 动作。同样为纯新增动作，不改动�
 2026-11-07 本批已随滤镜页签接线交付该消费侧——FilterModel / FilterService 与
 AppFilterCard / AppFilterParameterGroup / AppFilterChainItem /
 AppFilterInspector，批次口径见 CHANGELOG 同日 Phase 6A 条目）。
+
+Phase 6（总纲 §13 第 6-7 项：G'MIC 依赖探测与 Batch Processing）本轮增补：
+§3 新增 `batch.start` / `batch.cancel`（§3.5）与 `gmic.check`（§3.6），§2.3
+允许任务事件携带动作特定增补字段。仍为纯新增：不删除字段、不改既有字段
+语义，`protocol` 保持 `1`（§8 兼容性规则）。Python 侧实现于
+`python_worker/adapters/batch_adapter.py` 与 `python_worker/dispatcher.py`
+（动作表），复用 1.0 资产——`processors/batch_filter_chain.py`
+`run_batch_filter_chain`（逐文件 load → 链 → save 与逐项记账；本批仅为其补
+`quality` / `output_name_fn` 两个可选参数）、`processors/batch.py`
+`batch_rename` 的 pattern 占位符语义、`processors/cancellation.py`
+`CancelToken`、`processors/gmic.py`（CLI 探测）；测试锁为
+`tests/test_worker_batch.py`。C++ 侧批处理消费实现于
+`native/services/batch_service.cpp` 与 `native/models/batch_model.cpp`
+（逐文件行模型，测试锁 `tests/native/test_batch_service.cpp` /
+`test_batch_model.cpp`，与本节字段同步交付）；既有 `TaskModel`
+（`native/models/task_model.cpp`）只消费 `task.progress` 的 `progress`
+字段，本节增补字段对其为向后兼容的纯新增（消费方忽略未知字段）。
+
+Phase 6B 复查（2026-11-07，与本节实现逐字段核对后的修订）：§3 表与 §3.5 的
+`batch.start` 受理回执补 `status` 字段（实现 `TaskRuntime.submit` 的回执含
+`status: "queued"`，`Dispatcher` 经 `job.accepted_extra` 并入 `total`——此前
+文档写 `{task_id, total}`、测试断言 `total` 而实现漏交，现三方一致）。消费侧
+现状如实记录：C++ `BatchService::cancelBatch` 经 `task.cancel` 转发
+（`native/services/batch_service.cpp:88-96`，与 `batch.cancel` 同一
+TaskRuntime 取消通道、语义一致），`batch.cancel` 与 `gmic.check` 动作本身
+目前没有 C++ 调用方——G'MIC 置灰路径消费的是 `filter.list` 的
+`available`/`optional_deps`（Phase 6A 交付口径），`gmic.check` 为设置页
+"外部依赖"分组的规划数据源（ui-page-spec.md §4），尚未接线。
 
 ### 3.1 文档版本（document version）
 
@@ -268,6 +304,100 @@ AppFilterInspector，批次口径见 CHANGELOG 同日 Phase 6A 条目）。
   成功。
 - 预设与文档无关：四个动作均不接受/返回 `document_id`，不触碰 §3.1 的
   `version`，不产生任务（无 task_id、无 task.* 事件）。
+
+### 3.5 批处理（batch.start / batch.cancel，Phase 6 增补）
+
+`batch.start`（async）把一组路径经可选滤镜链批量写到目标目录。参数：
+
+- `paths`：非空数组，元素为非空字符串路径，可混含文件与目录；目录**递归
+  扫描**。只有 `processors/utils.py` `SUPPORTED_READ` 扩展名的文件纳入
+  批处理（其余文件忽略）；路径不存在 → 同步 `FILE_NOT_FOUND`；全部输入
+  展开后没有可处理文件 → 同步 `FILE_NOT_FOUND`。同一文件只计一次（目录与
+  其内文件并列、重复条目去重，按绝对路径）；展开结果按路径排序，`pattern`
+  的 `{i}` 序号依此序。以上判定均在提交任务前同步完成（错误响应不产生
+  task_id，与 `filter.preview` 的链校验先例一致）。
+- `output_dir`：必需，输出目录（不存在则创建）。
+- `format`：必需，输出格式（如 `PNG` / `JPEG` / `WEBP`），大小写不敏感；
+  `JPEG` 规范化为 `.jpg` 扩展名（1.0 批量链处理既有规则）；不在
+  `SUPPORTED_WRITE` → 同步 `INVALID_PARAMS`。
+- `quality`：可选整数 1-100，透传 `processors/utils.py` `save_image`；
+  缺省用 `save_image` 自身缺省（JPEG/WebP 92；PNG 等无损格式不适用）。
+  非整数或越界 → 同步 `INVALID_PARAMS`。
+- `naming`：`keep`（缺省）/ `suffix` / `pattern`。
+  - `keep`：`{源文件名}.{输出扩展名}`（1.0 批量处理既有命名）。
+  - `suffix`：`{源文件名}_batch.{输出扩展名}`（输出目录与源目录相同时也
+    不覆盖源图）。
+  - `pattern`：`pattern` 必须为非空字符串，占位符与 `processors/batch.py`
+    `batch_rename` 同款——`{name}`=源文件名（不含扩展名）、`{ext}`=输出
+    扩展名（含点）、`{i}`/`{index}`=自 1 起按扫描序 3 位补零的序号；
+    格式化结果若不以输出扩展名结尾则自动补齐（保证按 `format` 落盘）。
+    `naming=pattern` 缺 `pattern`、占位符拼写非法 → 同步 `INVALID_PARAMS`。
+- `steps`：可选，形状与 `filter.preview` / `filter.apply` 的 `filters` 参数
+  一致（`[{filter_key, params, enabled}]`），校验方式相同（未知 key / 参数
+  非法 → 同步 `INVALID_PARAMS`）。缺省或空数组 = 纯格式转换（逐文件
+  load → save，不跑滤镜）。
+
+同步响应 `{task_id, status, total}`（`status` 为 §2.3 受理回执既有字段；
+`total` 为扫描所得文件数，与完成事件 `result.total` 同源）。执行复用
+`processors/batch_filter_chain.py` `run_batch_filter_chain`：逐文件 load →
+滤镜链 → save；单个文件失败（解码/处理/写盘）记为该项 failed，**不中断**
+批处理（1.0 批量面板同款汇总行为）。输出同名默认覆盖（与 1.0 面板缺省
+一致；本动作不暴露 overwrite 参数）。任务完成时 `task.completed` 的
+`result` 为 `{total, done, succeeded, failed, current, state: "done",
+output_dir, items}`，`done = succeeded + failed`（到达终态的条数）；
+`items` 为**逐文件全量对账**（见下），补齐被进度节流丢弃的终态帧。
+
+批处理进度字段（对齐 §2.3 既有任务进度协议，仅 batch 任务携带；消费方
+忽略未知字段）。`task.progress` 为**逐文件帧**，条目到达自身终态时发出：
+
+| 字段 | 出现位置 | 含义 |
+|---|---|---|
+| `task_id` | 所有事件顶层（§2.3 既有） | 任务 ID |
+| `file` | `task.progress` 附加字段 | 行键：该帧所指源文件的绝对路径 |
+| `state` | 同上 | **该条目**的状态，取值 `running/done/failed/cancelled`；本实现只在条目终态发帧，实际值为 `done` / `failed` |
+| `progress` | 同上 | 该条目进度百分比（终态帧为 100） |
+| `output_path` | 同上，可省 | `done` 条目的输出文件绝对路径；`failed` 条目省略 |
+| `done` | 同上；`task.completed.result` | 整批聚合：已到达终态的条数 |
+| `total` | 同上 | 扫描所得总数（= start 响应的 `total`） |
+| `current` | 同上 | 聚合视角最近一次状态变更涉及的源文件绝对路径（逐文件帧上等于 `file`；completed 时为空串） |
+| `error` | `task.failed.error`（§2.3 既有形状）；逐文件对账条目内 | 整批失败/取消由 `task.failed.error` 承载（`code = "CANCELLED"` 表示取消，§7）；单文件失败在 `items` 条目的 `error` 上 |
+
+- 批处理整体状态由事件生命周期表达（§2.3）：completed ⇒ 整批 done；
+  failed / cancelled 不引入新事件类型，仍映射为 `task.failed`，批处理
+  字段不在 failed 事件上重复出现。
+- 进度事件照旧 ≥100ms 节流（§7），逐文件帧可能被丢弃——行状态的最终
+  真相源是 `task.completed.result.items`（UI 侧不得把进度帧当第二真相源）。
+- `items` 条目形状：`{file, state, error?, output_path?}`，`state` 映射
+  `done | failed`（完成批次；`cancelled` / `pending` 仅在理论上可能出现，
+  如实映射不虚构）；`error` / `output_path` 空时省略。
+- 取消收尾呈现（把未完成行收尾为 `skipped`）由 C++ 侧负责
+  （`native/models/batch_model.cpp` `markActiveAs`），Worker 不发
+  `skipped` 词汇。
+
+`batch.cancel`（sync）`{task_id}` → `{cancelled: true}`：取消信号已送达，
+任务在下一协作检查点停止（逐文件边界 + 滤镜链步骤内检查点，复用
+`processors/cancellation.py` `CancelToken`）；任务已终结 →
+`{cancelled: false}`（不谎报已取消）；未知 `task_id` → `UNKNOWN_TASK`
+（同 `task.cancel`）。取消后任务以 `task.failed`
+（`error.code = "CANCELLED"`）收尾；被取消条目不写输出。
+
+`batch.start` 为标准异步任务：适用 §7 全部取消语义与 §2.3 生命周期；不经
+DocumentStore、无 `document_id`，不触碰 §3.1 的文档 `version`。
+
+### 3.6 G'MIC 可用性探测（gmic.check，Phase 6 增补）
+
+`gmic.check`（sync）`{}` → `{available, version, source}`：
+
+- 优先探测 `gmic` CLI（`processors/gmic.py` `available()` / `version()`，
+  即 `shutil.which("gmic")` + `gmic -version`）→ `{available: true,
+  version: "<x.y.z>", source: "cli"}`；版本号无法解析时如实记 `"unknown"`。
+- CLI 不存在时尝试 `import gmic`（python-gmic 绑定）→ `{available: true,
+  version: "<模块 __version__，缺失记 unknown>", source: "python"}`。
+- 都不可用 → `{available: false, version: "", source: null}`，**不抛错**——
+  可用性探测是诊断动作，依赖缺失不是协议错误（与滤镜卡片按
+  `optional_deps` 置灰的原则一致，Phase 6A 交付口径）。
+- 本动作不产生任务、不触碰文档与任务状态；`source` 仅在 `available=true`
+  时为 `"cli" | "python"`。
 
 ## 4. 大图数据传递（总纲 §6.3）
 

@@ -41,14 +41,17 @@ class Task:
         self._lock = threading.Lock()
 
     # ---- 供任务函数调用（与 processors 的 (progress_cb, cancel_token) 约定一致）----
-    def progress_cb(self, value: int, message: str = '') -> None:
+    def progress_cb(self, value: int, message: str = '',
+                    extra: dict[str, Any] | None = None) -> None:
+        """extra：动作特有增补字段（批处理 done/total/current/state，§3.5）；
+        节流与既有语义不变，不传 extra 的任务消息形状不变。"""
         with self._lock:
             now = _monotonic()
             if now - self._last_progress_at < PROGRESS_MIN_INTERVAL:
                 return
             self._last_progress_at = now
             self.progress = int(value)
-        self._emit(protocol.make_progress(self.task_id, value, message))
+        self._emit(protocol.make_progress(self.task_id, value, message, extra))
 
     def _set_status(self, status: str) -> None:
         with self._lock:
