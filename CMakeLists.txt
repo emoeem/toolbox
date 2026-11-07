@@ -190,6 +190,8 @@ if(BUILD_TESTING)
         URI Toolbox
         VERSION 1.0
         RESOURCE_PREFIX "/"
+        # 与主程序同 URI → 生成目录会与 toolbox 模块冲突（CI 实证），单独指派。
+        OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/smoke-qml/Toolbox
         SOURCES ${TOOLBOX_SMOKE_SOURCES}
         QML_FILES ${QML_FILES}
     )
