@@ -8,21 +8,21 @@
 // 再改"成为可能。与主程序共享同一份 qrc:/Toolbox 模块：本目标用相同
 // SOURCES/QML_FILES 重复声明 qt_add_qml_module（独立二进制，不与主程序冲突），
 // C++ QML 单例（Application/SettingsService 等）随源编入。
+#include <QDir>
 #include <QGuiApplication>
+#include <QImage>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
-#include <QUrl>
-#include <QDir>
-#include <QImage>
 #include <QTest>
+#include <QUrl>
 #include <app/application.h>
 
 class QmlSmokeTest : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     // 主壳加载即门禁：任何类型解析失败都会让 rootObjects 为空，
     // QML 错误明细由默认消息处理器打到 stderr（ctest 失败输出可见）。
     void mainShellLoads() {
@@ -53,8 +53,8 @@ private slots:
         // 窗口先稳定渲染一帧，避免首帧空白。
         QTest::qWait(300);
         const QStringList pageIds = {
-            QStringLiteral("home"),  QStringLiteral("editor"), QStringLiteral("create"),
-            QStringLiteral("batch"), QStringLiteral("analyze"), QStringLiteral("ai"),
+            QStringLiteral("home"),  QStringLiteral("editor"),   QStringLiteral("create"),
+            QStringLiteral("batch"), QStringLiteral("analyze"),  QStringLiteral("ai"),
             QStringLiteral("files"), QStringLiteral("settings"),
         };
         for (const QString &id : pageIds) {
