@@ -14,7 +14,7 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Qml Test)
 
 qt_standard_project_setup(REQUIRES 6.4)
 
-qt_add_executable(toolbox
+set(TOOLBOX_SOURCES
     native/app/main.cpp
     native/app/application.h
     native/app/application.cpp
@@ -65,6 +65,8 @@ qt_add_executable(toolbox
     native/backend/backend_manager.h
     native/backend/backend_manager.cpp
 )
+
+qt_add_executable(toolbox ${TOOLBOX_SOURCES})
 
 # 跨目录 C++ include 走 tests/native 的同一约定：以 native/ 为唯一 include 根，
 # 源码里用路径限定写法（"models/tool_model.h"、"backend/ipc_protocol.h"）。
@@ -159,6 +161,38 @@ target_link_libraries(toolbox PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    # QML 烟雾/截图测试（tests/native/test_qml_smoke.cpp）：必须在“本目录”
+    # 声明模块——qt_add_qml_module 按 CMAKE_CURRENT_SOURCE_DIR 解析 QML 相对
+    # 路径并决定 qrc 内嵌位置（tests/native 子目录声明会把 Main.qml 错位、
+    # qrc:/Toolbox/ui/Main.qml 变 No such file or directory，CI 实证）。
+    # 与主程序完全同源：同一批 C++ 源 + 同一批 QML，保证测的就是真实应用壳。
+    qt_add_executable(test_qml_smoke tests/native/test_qml_smoke.cpp)
+    target_include_directories(test_qml_smoke PRIVATE
+        ${CMAKE_SOURCE_DIR}/native
+        ${CMAKE_SOURCE_DIR}/native/app
+        ${CMAKE_SOURCE_DIR}/native/core
+        ${CMAKE_SOURCE_DIR}/native/models
+        ${CMAKE_SOURCE_DIR}/native/services
+        ${CMAKE_SOURCE_DIR}/native/backend
+        ${CMAKE_SOURCE_DIR}/native/graphics
+    )
+    target_link_libraries(test_qml_smoke PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::Test
+    )
+    set(TOOLBOX_SMOKE_SOURCES ${TOOLBOX_SOURCES})
+    list(REMOVE_ITEM TOOLBOX_SMOKE_SOURCES native/app/main.cpp)
+    qt_add_qml_module(test_qml_smoke
+        URI Toolbox
+        VERSION 1.0
+        RESOURCE_PREFIX "/"
+        SOURCES ${TOOLBOX_SMOKE_SOURCES}
+        QML_FILES ${QML_FILES}
+    )
     add_subdirectory(tests/native)
 endif()
 

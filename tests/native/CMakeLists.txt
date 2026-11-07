@@ -1,85 +1,10 @@
 # Native (C++) test suite. Runs under CTest on Linux CI and the target env.
 find_package(Qt6 6.4 REQUIRED COMPONENTS Quick Test)
 
-# QML 烟雾测试（v2.0.0-alpha.1 实机反馈催生，见 test_qml_smoke.cpp 头注释）：
-# 与主程序相同的 C++ 源 + 同一份 ${QML_FILES}（根目录定义）重复声明
-# qt_add_qml_module——测试二进制内嵌同一份 qrc:/Toolbox 与 C++ QML 单例，
-# offscreen 真加载 Main.qml。构建成本翻倍（全量 TU 编两遍）换取
-# "QML 运行时坏即 CI 红"的永久门禁；发布构建 BUILD_TESTING=OFF 不受影响。
-qt_add_executable(test_qml_smoke test_qml_smoke.cpp)
-target_link_libraries(test_qml_smoke PRIVATE
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Qml
-    Qt6::Quick
-    Qt6::QuickControls2
-    Qt6::Test
-)
-# qt_add_qml_module 按“当前源目录”解析 QML_FILES 相对路径（CI 实证：ui/Main.qml
-# 被找成 tests/native/ui/Main.qml）——这里必须转绝对路径。
-set(QML_FILES_ABS)
-foreach(_qml ${QML_FILES})
-  list(APPEND QML_FILES_ABS "${CMAKE_SOURCE_DIR}/${_qml}")
-endforeach()
-qt_add_qml_module(test_qml_smoke
-    URI Toolbox
-    VERSION 1.0
-    RESOURCE_PREFIX "/"
-    SOURCES
-        ${CMAKE_SOURCE_DIR}/native/app/application.h
-        ${CMAKE_SOURCE_DIR}/native/app/application.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/tool_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/tool_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/task_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/task_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/filter_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/filter_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/filter_chain_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/filter_chain_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/batch_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/batch_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/generator_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/generator_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/assist_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/assist_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/models/history_model.h
-        ${CMAKE_SOURCE_DIR}/native/models/history_model.cpp
-        ${CMAKE_SOURCE_DIR}/native/services/settings_service.h
-        ${CMAKE_SOURCE_DIR}/native/services/settings_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/services/font_service.h
-        ${CMAKE_SOURCE_DIR}/native/services/font_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/services/filter_service.h
-        ${CMAKE_SOURCE_DIR}/native/services/filter_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/services/batch_service.h
-        ${CMAKE_SOURCE_DIR}/native/services/batch_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/services/studio_service.h
-        ${CMAKE_SOURCE_DIR}/native/services/studio_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/services/assist_service.h
-        ${CMAKE_SOURCE_DIR}/native/services/assist_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/core/document_service.h
-        ${CMAKE_SOURCE_DIR}/native/core/document_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/graphics/image_canvas.h
-        ${CMAKE_SOURCE_DIR}/native/graphics/image_canvas.cpp
-        ${CMAKE_SOURCE_DIR}/native/backend/ipc_protocol.h
-        ${CMAKE_SOURCE_DIR}/native/backend/ipc_protocol.cpp
-        ${CMAKE_SOURCE_DIR}/native/backend/python_worker.h
-        ${CMAKE_SOURCE_DIR}/native/backend/python_worker.cpp
-        ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.h
-        ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.cpp
-    QML_FILES ${QML_FILES_ABS}
-)
-# 根目录对 Theme.qml 的 QT_QML_SINGLETON_TYPE 是目录作用域，子目录不继承。
-set_source_files_properties(${CMAKE_SOURCE_DIR}/ui/themes/Theme.qml
-    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-target_include_directories(test_qml_smoke PRIVATE
-    ${CMAKE_SOURCE_DIR}/native
-    ${CMAKE_SOURCE_DIR}/native/app
-    ${CMAKE_SOURCE_DIR}/native/core
-    ${CMAKE_SOURCE_DIR}/native/models
-    ${CMAKE_SOURCE_DIR}/native/services
-    ${CMAKE_SOURCE_DIR}/native/backend
-    ${CMAKE_SOURCE_DIR}/native/graphics
-)
+# QML 烟雾/截图测试：目标 test_qml_smoke 在根 CMakeLists（BUILD_TESTING 块内）
+# 声明——必须在主程序同目录才能保证 qrc:/Toolbox/ui/... 内嵌路径一致
+# （子目录声明会把模块路径错位成 No such file or directory，CI 实证）。
+# 这里只注册 ctest 条目。
 add_test(NAME qml_smoke COMMAND test_qml_smoke)
 # 同一二进制的截图职能（QTest 槽名定向执行）；产物供视觉评审闭环。
 add_test(NAME qml_screenshots COMMAND test_qml_smoke capturePages)
