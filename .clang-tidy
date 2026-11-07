@@ -1,0 +1,16 @@
+# Static analysis baseline for native/ code. Start conservative; tighten as
+# the codebase matures (record changes in CHANGELOG when raising the bar).
+Checks: >
+  -*,
+  bugprone-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -modernize-use-trailing-return-type,
+  -readability-magic-numbers,
+  -readability-identifier-length
+
+WarningsAsErrors: ''
+HeaderFilterRegex: 'native/.*\.h$'
+FormatStyle: file

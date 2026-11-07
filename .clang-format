@@ -1,0 +1,22 @@
+# Toolbox 2.0 C++ formatting (native/ + tests/native).
+# Qt-flavoured: 4-space indent, Qt-style pointers (Type *x = PointerAlignment
+# Right), attached braces. The authoritative style is whatever this file
+# produces — CI's clang-format bot applies it mechanically and pushes back.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Right
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+SortIncludes: CaseSensitive
+IncludeCategories:
+  - Regex: '^"'
+    Priority: 1
+  - Regex: '^<Q'
+    Priority: 2
+  - Regex: '^<'
+    Priority: 3
+InsertNewlineAtEOF: true

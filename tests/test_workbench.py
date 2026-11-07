@@ -51,3 +51,14 @@ class TestLogWidget(unittest.TestCase):
         w.clear()
         self.assertEqual(w.filtered_messages(), [])
         w.close()
+
+
+def tearDownModule():
+    """Exit-time double-delete workaround — rationale in test_task_and_history."""
+    import gc
+
+    gc.collect()
+
+
+if __name__ == "__main__":
+    unittest.main()

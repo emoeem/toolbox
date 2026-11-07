@@ -8,6 +8,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtOpenGL import QOpenGLShader, QOpenGLShaderProgram, QOpenGLTexture, QOpenGLBuffer, QOpenGLVertexArrayObject
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QImage, QPainter
 from processors.shader_studio import ShaderLibrary, ShaderPreset, parse_uniforms, validate_glsl
+from ..fonts import mono_font
 
 VERTEX='''#version 330 core\nlayout(location=0) in vec2 a_pos;\nout vec2 v_uv;\nvoid main(){ v_uv=(a_pos+1.0)*0.5; gl_Position=vec4(a_pos,0.0,1.0); }'''
 
@@ -23,8 +24,8 @@ class GLSLHighlighter(QSyntaxHighlighter):
 
 class LineEditor(QPlainTextEdit):
     GUTTER_W = 48
-    def __init__(self):
-        super().__init__(); self.setFont(QFont('Maple Mono',11)); self.setTabStopDistance(32); self.highlighter=GLSLHighlighter(self.document())
+    def __init__(self, font: QFont | None = None):
+        super().__init__(); mono=QFont(font) if font else QFont(); mono.setStyleHint(QFont.Monospace); self.setFont(mono); self.setTabStopDistance(32); self.highlighter=GLSLHighlighter(self.document())
         # The gutter must exist before any updateRequest can arrive: creating it
         # lazily in resizeEvent made _update raise AttributeError on the first
         # layout/paint pass (updateRequest fires before resizeEvent).
@@ -101,7 +102,7 @@ class ShaderStudioPanel(QWidget):
     def _build(self):
         root=QVBoxLayout(self); split=QSplitter(Qt.Horizontal); root.addWidget(split)
         left=QWidget(); ll=QVBoxLayout(left); self.search=QLineEdit(); self.search.setPlaceholderText('搜索 Shader / 标签…'); ll.addWidget(self.search); self.list=QListWidget(); ll.addWidget(self.list); self.search.textChanged.connect(self._filter); self.list.currentRowChanged.connect(self._load_row); split.addWidget(left)
-        center=QWidget(); cl=QVBoxLayout(center); cl.addWidget(self.preview,2); self.status=QLabel(''); cl.addWidget(self.status); self.editor=LineEditor(); cl.addWidget(self.editor,3); split.addWidget(center)
+        center=QWidget(); cl=QVBoxLayout(center); cl.addWidget(self.preview,2); self.status=QLabel(''); cl.addWidget(self.status); self.editor=LineEditor(mono_font(self.settings)); cl.addWidget(self.editor,3); split.addWidget(center)
         right=QWidget(); rl=QVBoxLayout(right); form=QFormLayout(); self.name=QLineEdit(); form.addRow('名称',self.name); self.res=QComboBox(); self.res.addItems(['预览分辨率','640×480','1280×720','1920×1080']); form.addRow('分辨率',self.res); self.play=QCheckBox('播放时间 uniform'); self.play.setChecked(True); form.addRow(self.play); rl.addLayout(form); self.uniform_box=QGroupBox('Uniform 参数'); self.uniform_layout=QFormLayout(self.uniform_box); rl.addWidget(self.uniform_box); btn=QHBoxLayout();
         for text,fn in [('验证',self.validate),('导入',self.import_preset),('导出',self.export_preset),('保存',self.save_preset),('删除',self.delete_preset),('导出图片',self.export_image)]: b=QPushButton(text); b.clicked.connect(fn); btn.addWidget(b)
         rl.addLayout(btn); rl.addStretch(); split.addWidget(right); split.setSizes([220,720,360]); self.editor.textChanged.connect(self._schedule); self.name.textChanged.connect(self._schedule); self.preview.compileError.connect(lambda e:self.status.setText('❌ '+e)); self.preview.compiled.connect(lambda ok:self.status.setText('✓ GLSL 编译通过' if ok else '❌ GLSL 编译失败'))
