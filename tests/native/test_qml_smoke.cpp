@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QGuiApplication>
 #include <QImage>
+#include <QLibraryInfo>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -29,6 +30,12 @@ class QmlSmokeTest : public QObject {
     void mainShellLoads() {
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         QQmlApplicationEngine engine;
+        // CI 实证：apt 布局下 QtQuick.Controls 报插件 "not found"（qmldir 可
+        // 读但插件解析失败）——显式补 QLibraryInfo 的 Qml2Imports 并打印
+        // 路径地面真相。
+        engine.addImportPath(QLibraryInfo::path(QLibraryInfo::Qml2ImportsPath));
+        qWarning() << "Qml2ImportsPath:" << QLibraryInfo::path(QLibraryInfo::Qml2ImportsPath);
+        qWarning() << "importPaths:" << engine.importPathList();
         engine.load(QUrl(QStringLiteral("qrc:/Toolbox/ui/Main.qml")));
         QVERIFY2(!engine.rootObjects().isEmpty(),
                  "Main.qml 加载失败——QML 错误明细见上方 stderr 输出");
@@ -40,6 +47,7 @@ class QmlSmokeTest : public QObject {
         QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         QQmlApplicationEngine engine;
+        engine.addImportPath(QLibraryInfo::path(QLibraryInfo::Qml2ImportsPath));
         engine.load(QUrl(QStringLiteral("qrc:/Toolbox/ui/Main.qml")));
         QVERIFY2(!engine.rootObjects().isEmpty(),
                  "Main.qml 加载失败——QML 错误明细见上方 stderr 输出");
