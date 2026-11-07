@@ -318,8 +318,10 @@ class WorkerAnnotateTests(unittest.TestCase):
 
     def test_eraser_after_adjust_recovers_channel_mismatched_baseline(self):
         """源图基线 RGBA（4ch）与 adjust 后画布 RGB（3ch）通道数不一致但
-        几何一致：eraser 按基线前 C 通道恢复源图（§3.9 降级只限几何不一致）；
-        undo/redo 经参数化重放逐位一致（重放基线同为 RGBA，同款通道裁剪）。"""
+        几何一致：eraser 按基线前 C 通道恢复**笔画覆盖区**（§3.9 语义；
+        降级只限几何不一致）。adjust 改变全图像素，笔画区外画布保持本动作
+        应用前像素——整画布回到源图不是 eraser 的语义。undo/redo 经参数化
+        重放逐位一致（重放基线同为 RGBA，同款通道裁剪）。"""
         self._open_noise()
         self._run('image.adjust', {'document_id': self.document_id,
                                    'adjustments': {'brightness': 40},
@@ -332,22 +334,36 @@ class WorkerAnnotateTests(unittest.TestCase):
         self.assertNotEqual(after_pen_sha,
                             _sha256_array(self.doc().source_image[:, :, :3]))
 
-        # 同路径、更宽笔刷的 eraser 完全覆盖笔触 → 回到源图 RGB 分量，
-        # 画布保持 3ch（不越界写、不改变通道形状）。
+        # 同路径、更宽笔刷的 eraser：笔画覆盖区恢复源图 RGB 分量（4ch 基线
+        # 前 3 通道，RGB 分量逐位对应），笔画区外保持 adjust+pen 后像素，
+        # 画布保持 3ch（不越界写、不改变通道形状）。掩膜按实现同款几何复刻
+        # （PIL line joint='curve' + 圆头端点，width 9），两类区域都锁定。
+        pre_eraser = self.doc().image.copy()
         self._annotate([{'type': 'eraser', 'points': [[10, 48], [54, 48]], 'width': 9}])
         image = self.doc().image
+        post_eraser_sha = _sha256_array(image)
         self.assertEqual(image.shape[2], 3)
-        self.assertTrue(np.array_equal(image[:, :, :3],
-                                       self.doc().source_image[:, :, :3]))
+        from PIL import Image, ImageDraw
+
+        from python_worker.adapters.image_adapter import _draw_round_caps
+        eraser_points = [(10, 48), (54, 48)]
+        mask_img = Image.new('L', (int(image.shape[1]), int(image.shape[0])), 0)
+        mask_draw = ImageDraw.Draw(mask_img)
+        mask_draw.line(eraser_points, fill=255, width=9, joint='curve')
+        _draw_round_caps(mask_draw, eraser_points, 9, 255)
+        stroked = np.asarray(mask_img) > 0
+        self.assertTrue(np.array_equal(image[stroked],
+                                       self.doc().source_image[:, :, :3][stroked]))
+        self.assertTrue(np.array_equal(image[~stroked], pre_eraser[~stroked]))
 
         # undo（弹出 eraser 条目）：从 adjust 快照锚点重放 pen 前缀 → 回到
-        # pen 后状态；redo（重放 eraser 条目，基线随行）→ 逐位回到源图。
-        # 版本 §3.3：undo 也递增（adjust v1 → pen v2 → eraser v3 → undo v4）。
+        # pen 后状态；redo（重放 eraser 条目，基线随行）→ 逐位回到 eraser 后
+        # 状态（重放确定性）。版本 §3.3：undo 也递增
+        # （adjust v1 → pen v2 → eraser v3 → undo v4）。
         undone = self._run('image.undo', {'document_id': self.document_id})
         self.assertEqual(_sha256_array(self.doc().image), after_pen_sha)
         self._run('image.redo', {'document_id': self.document_id})
-        self.assertTrue(np.array_equal(self.doc().image[:, :, :3],
-                                       self.doc().source_image[:, :, :3]))
+        self.assertEqual(_sha256_array(self.doc().image), post_eraser_sha)
         self.assertEqual(undone['version'], 4)
 
     def test_multi_call_undo_redo_replays_ops_prefix(self):
