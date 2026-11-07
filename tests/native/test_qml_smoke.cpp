@@ -46,7 +46,7 @@ class QmlSmokeTest : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
         QVERIFY2(window != nullptr, "根对象不是 QQuickWindow");
         // Qt 6.4 无 (uri, typeName) 模板重载（CI 实证），经 qmlTypeId 取。
-        const int appTypeId = qmlTypeId("Toolbox", "Application");
+        const int appTypeId = qmlTypeId("Toolbox", 1, 0, "Application");
         QVERIFY2(appTypeId != -1, "QML 类型 Toolbox/Application 未注册");
         auto *application = engine.singletonInstance<toolbox::Application *>(appTypeId);
         QVERIFY2(application != nullptr, "Application 单例不可达");
