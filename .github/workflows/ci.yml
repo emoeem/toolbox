@@ -133,3 +133,13 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --preset linux-ci
+
+      # UI 截图（qml_screenshots 测试产物）：视觉评审闭环的输入。
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: build/linux-ci/screenshots
+          if-no-files-found: ignore
+          retention-days: 14

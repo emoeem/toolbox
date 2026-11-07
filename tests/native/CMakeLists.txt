@@ -81,6 +81,11 @@ target_include_directories(test_qml_smoke PRIVATE
     ${CMAKE_SOURCE_DIR}/native/graphics
 )
 add_test(NAME qml_smoke COMMAND test_qml_smoke)
+# 同一二进制的截图职能（QTest 槽名定向执行）；产物供视觉评审闭环。
+add_test(NAME qml_screenshots COMMAND test_qml_smoke capturePages)
+set_tests_properties(qml_screenshots PROPERTIES
+    ENVIRONMENT "SCREENSHOT_DIR=${CMAKE_BINARY_DIR}/screenshots"
+    SKIP_RETURN_CODE 77)
 
 qt_add_executable(test_native_models test_models.cpp)
 target_link_libraries(test_native_models PRIVATE
