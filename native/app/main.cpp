@@ -13,7 +13,9 @@ int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     QGuiApplication::setOrganizationName(QStringLiteral("Emo"));
     QGuiApplication::setApplicationName(QStringLiteral("Toolbox2"));
-    QGuiApplication::setApplicationVersion(QStringLiteral("0.2.0"));
+    // 与 pyproject.toml version（单一来源）对齐，见 CHANGELOG.md
+    // v2.0.0-alpha.1 条目。
+    QGuiApplication::setApplicationVersion(QStringLiteral("2.0.0-alpha.1"));
 
     // Basic style: unstyled primitives that our design system fully controls.
     QQuickStyle::setStyle(QStringLiteral("Basic"));
