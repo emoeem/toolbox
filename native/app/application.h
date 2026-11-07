@@ -47,8 +47,8 @@ class Application : public QObject {
     QUrl currentPage() const { return m_currentPage; }
     void setCurrentPage(const QUrl &page);
     // 与 pyproject.toml version（单一来源）对齐，见 CHANGELOG.md
-    // v2.0.0-alpha.1 条目。
-    QString version() const { return QStringLiteral("2.0.0-alpha.1"); }
+    // v2.0.0-alpha.2 条目。
+    QString version() const { return QStringLiteral("2.0.0-alpha.2"); }
     QString qtVersion() const;
 
     Q_INVOKABLE void navigate(const QString &pageId);

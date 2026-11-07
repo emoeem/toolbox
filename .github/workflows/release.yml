@@ -14,18 +14,26 @@ jobs:
   # AppImage.
   build-linux:
     name: Build (linux tar.gz + AppImage)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       VERSION_NO_V: ${{ github.ref_name }}
+      # noble 的发行版 Qt 路径（Qt 6.4.2，与 CMake 下限一致）。
+      QT_ROOT_DIR: /usr/lib/x86_64-linux-gnu/qt6
+      QT_LIB_DIR: /usr/lib/x86_64-linux-gnu
+      QT_QMAKE: /usr/lib/qt6/bin/qmake6
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.4.3"
-          cache: false
+      # 发行版 Qt 三件（base/declarative/wayland）：aqt 基础包不带 wayland
+      # 平台插件，用户 Wayland 会话首启即 "Could not find the Qt platform
+      # plugin wayland"（v2.0.0-alpha.1 实机反馈）。发行版包版本自洽，
+      # plugins/qml 路径见 QT_ROOT_DIR。
+      - name: Install Qt (distro packages)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev qt6-declarative-dev qt6-wayland ninja-build
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -50,9 +58,12 @@ jobs:
           cp build/toolbox "$PKG/toolbox"
           chmod +x "$PKG/toolbox"
           mkdir -p "$PKG/qt/lib" "$PKG/qt/plugins" "$PKG/qt/qml"
-          cp -a "$QT_ROOT_DIR/lib/libQt6"*.so* "$PKG/qt/lib/" || true
-          cp -a "$QT_ROOT_DIR/lib/libicu"*.so* "$PKG/qt/lib/" || true
+          cp -a "$QT_LIB_DIR/libQt6"*.so* "$PKG/qt/lib/" || true
+          cp -a "$QT_LIB_DIR/libicu"*.so* "$PKG/qt/lib/" || true
           cp -a "$QT_ROOT_DIR/plugins/." "$PKG/qt/plugins/"
+          # wayland 平台插件必须在场（换发行版 Qt 的根本原因，见上）。
+          ls "$PKG/qt/plugins/platforms/" | grep -q wayland || {
+            echo "FATAL: wayland platform plugin missing"; ls "$PKG/qt/plugins/platforms/"; exit 1; }
           # Qt 自身的 QML 运行时模块在 $QT_ROOT_DIR/qml/（不在 plugins/）。
           # 应用自己的 QML 全部编进 qrc，磁盘上没有 .qml，但 QtQuick/Controls
           # 等模块必须随包携带并在 toolbox.sh 里暴露导入路径，否则用户机首启
@@ -93,6 +104,9 @@ jobs:
           exec "$DIR/toolbox"
           EOS
           chmod +x "$PKG/toolbox.sh"
+          # 打包自检（v2.0.0-alpha.1 实机反馈催生）：真实启动捆绑运行时并
+          # offscreen 真加载主壳 QML，类型/模块/插件问题就地红。
+          QT_QPA_PLATFORM=offscreen "$PKG/toolbox.sh" --qml-smoke
           tar -czf "toolbox-${VER}-linux-x64.tar.gz" -C pkg .
 
       - name: Build AppImage
@@ -164,13 +178,15 @@ jobs:
           # 但紧凑短选项写法的解析行为未经实证，删除以消除风险。输出名经
           # LDAI_OUTPUT（plugin-appimage 透传给 appimagetool 的目标路径）固定
           # 为确定性文件名，不依赖 desktop 文件派生的 glob。
-          LINUXDEPLOY_OUTPUT_VERSION="$VER" LDAI_OUTPUT="toolbox-${VER}-linux-x64.AppImage" ./linuxdeploy.AppImage \
+          LINUXDEPLOY_OUTPUT_VERSION="$VER" LDAI_OUTPUT="toolbox-${VER}-linux-x64.AppImage" LINUXDEPLOY_PLUGIN_QT_QMAKE="$QT_QMAKE" ./linuxdeploy.AppImage \
             --appdir "$APPDIR" \
             -e "$APPDIR/usr/bin/toolbox" \
             -d "$APPDIR/usr/share/applications/toolbox.desktop" \
             -i "$APPDIR/usr/share/icons/hicolor/256x256/apps/toolbox.png" \
             --plugin qt --output appimage
           test -f "toolbox-${VER}-linux-x64.AppImage" || { echo "AppImage output missing:"; ls -la ./*.AppImage 2>/dev/null || true; exit 1; }
+          # 打包自检：桌面入口（toolbox-start）同路径真加载主壳 QML。
+          APPIMAGE_EXTRACT_AND_RUN=1 "./toolbox-${VER}-linux-x64.AppImage" --qml-smoke
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -214,7 +230,7 @@ jobs:
           arch=('x86_64')
           url='https://github.com/emoeem/toolbox'
           license=('Apache-2.0')
-          depends=('qt6-base' 'qt6-declarative')
+          depends=('qt6-base' 'qt6-declarative' 'qt6-wayland')
           makedepends=('cmake' 'ninja' 'uv')
           options=(!strip)
           build() {
@@ -335,6 +351,10 @@ jobs:
           set "PATH=%~dp0python;%PATH%"
           start "" "%~dp0toolbox.exe"
           '@ | Out-File -Encoding ascii "$pkg/toolbox.bat"
+          # 打包自检：offscreen 真加载主壳 QML（v2.0.0-alpha.1 反馈催生）。
+          $env:QT_QPA_PLATFORM = "offscreen"
+          & "$pkg/toolbox.exe" --qml-smoke
+          if ($LASTEXITCODE -ne 0) { throw "QML smoke failed on windows bundle" }
           Compress-Archive -Path "pkg/toolbox-$ver-windows-x64" -DestinationPath "toolbox-$ver-windows-x64.zip"
 
       - name: Upload artifact
@@ -416,6 +436,9 @@ jobs:
           open "$DIR/Toolbox.app"
           EOS
           chmod +x "$PKG/start.command"
+          # 打包自检：bundle 内二进制真加载主壳 QML（runner 有 WindowServer，
+          # 用默认 cocoa 平台；offscreen 插件未必被 macdeployqt 部署）。
+          "$PKG/Toolbox.app/Contents/MacOS/toolbox" --qml-smoke
           cd pkg && zip -qry "../toolbox-${VER}-macos-arm64.zip" "toolbox-${VER}-macos-arm64" && cd ..
 
       - name: Upload artifact
@@ -436,25 +459,25 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      # 发布套件部署时应把 content/release-kit/release-body.md 复制为
-      # docs/release-notes-v2.0.0-alpha.1.md（与 release.yml →
-      # .github/workflows/release.yml 同批）。body_path 指向不存在文件会让
-      # release job 在四个构建 job 全部成功后才报 ENOENT，所以这里先解析
-      # 正文并回退：部署的正式说明 → CHANGELOG.md 的 2.0.0-alpha.1 小节 →
-      # 占位说明。
+      # 发布套件部署时应把 docs/release-notes-<tag>.md 一并提交（与
+      # release.yml → .github/workflows/release.yml 同批）。body_path 指向
+      # 不存在文件会让 release job 在构建 job 全部成功后才报 ENOENT，所以
+      # 这里先解析正文并回退：tag 同名说明 → CHANGELOG.md 对应小节 → 占位。
       - name: Resolve release notes body
+        env:
+          VERSION_NO_V: ${{ github.ref_name }}
         run: |
           set -e
-          if [ -f docs/release-notes-v2.0.0-alpha.1.md ]; then
-            cp docs/release-notes-v2.0.0-alpha.1.md release-notes-body.md
-          elif grep -q '^## 2\.0\.0-alpha\.1' CHANGELOG.md; then
-            awk '
-              /^## 2\.0\.0-alpha\.1/ { found = 1 }
-              found && /^## / && !/^## 2\.0\.0-alpha\.1/ { exit }
+          if [ -f "docs/release-notes-${VERSION_NO_V}.md" ]; then
+            cp "docs/release-notes-${VERSION_NO_V}.md" release-notes-body.md
+          elif grep -q "^## ${VERSION_NO_V}" CHANGELOG.md; then
+            awk -v pat="^## ${VERSION_NO_V}" '
+              $0 ~ pat { found = 1 }
+              found && /^## / && $0 !~ pat { exit }
               found { print }
             ' CHANGELOG.md > release-notes-body.md
           else
-            printf '# Toolbox 2.0.0-alpha.1\n\nPre-release build. Full notes: see CHANGELOG.md in the repository.\n' > release-notes-body.md
+            printf '# Toolbox %s\n\nPre-release build. Full notes: see CHANGELOG.md in the repository.\n' "$VERSION_NO_V" > release-notes-body.md
           fi
           test -s release-notes-body.md
       - name: Publish GitHub Release

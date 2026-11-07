@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.0.0-alpha.2（2026-11-08 发布）
+
+v2.0.0-alpha.1 实机反馈的两项修复 + 一项永久质量门禁：
+
+### Fixed
+
+- **Wayland 平台插件缺失**（用户实机：`Could not find the Qt platform
+  plugin "wayland"`）：Linux job 从 aqt 6.4.3 基础包（不含 qtwayland）改为
+  ubuntu-24.04 发行版 Qt 三件（qt6-base-dev / qt6-declarative-dev /
+  qt6-wayland），打包脚本新增 wayland 插件在场断言；Arch 包 depends 补
+  `qt6-wayland`。
+- **AppImage 插件定位**：linuxdeploy-plugin-qt 显式指定
+  `LINUXDEPLOY_PLUGIN_QT_QMAKE`（发行版 qmake6），启动器已暴露
+  QT_PLUGIN_PATH/QML2_IMPORT_PATH。
+
+### Added
+
+- **QML 运行时烟雾门禁**（三处）：
+  1. `tests/native/test_qml_smoke.cpp`：ctest offscreen 真加载
+     `qrc:/Toolbox/ui/Main.qml`（同 C++ 源 + 同 QML_FILES 重复声明模块，
+     测试二进制内嵌同一份 qrc 与 C++ QML 单例）——QML 类型解析错误自此
+     CI 必拦（此前 ctest 只测模型层，"AppButton is not a type" 类问题
+     全部漏网）。
+  2. `main.cpp --qml-smoke`：打包产物自检模式（offscreen 真加载主壳）。
+  3. release.yml 四包各跑一次 `--qml-smoke`（tar.gz / AppImage /
+     windows zip / macos bundle），构建绿 ≠ 能启动的缺口关闭。
+- Linux 打包基准升级 ubuntu-22.04 → ubuntu-24.04（GLIBC ≥ 2.39；Arch
+  用户不受影响，pacman 包继续用系统 Qt 构建）。
+
+### Known issues（如实）
+
+- 实机反馈的 `AppButton is not a type` 在本版构建中尚未在本机复现
+  （Windows 主机无 Qt 运行时）；QML 烟雾门禁上线后以 CI offscreen 加载
+  结果为准——若 CI 复现，修复随本标签循环完成后再发布。
+
 ## 2.0.0-alpha.1（2026-11-07 发布）
 
 Toolbox 2.0 首个发布版本（预发布 alpha）。定版依据总纲 `docs/toolbox-2.0-project-plan.md`：§13 Phase 0-7 的代码与文档工作已全部交付，Phase 8（打包、发布与最终质量验收）未开始，且 §14.2 要求未经目标环境验收不得标记 runtime_verified / accepted——因此首个发布版本号定为 **2.0.0-alpha.1**（预发布），正式版待 Phase 8 打包与 Linux 实机验收后另定。版本号单一来源为 `pyproject.toml`；app 内版本常量（`native/app/application.h` `Application::version()`、`native/app/main.cpp` `setApplicationVersion`）已同步对齐为同一值；`CMakeLists.txt` 的 project VERSION 语法只接受纯数字分量（无法表达预发布段），不作版本来源，与发布版本的对齐留给构建打包阶段。

@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "toolbox"
-# 版本单一来源（2.0 首个发布版本，见 CHANGELOG.md v2.0.0-alpha.1 条目）。
+# 版本单一来源（见 CHANGELOG.md v2.0.0-alpha.2 条目）。
 # app 内版本常量（native/app/application.h Application::version、
 # native/app/main.cpp setApplicationVersion）与本值保持对齐。CMake 的
-# project() VERSION 语法只接受纯数字分量（无法表达 -alpha.1），CMakeLists.txt
+# project() VERSION 语法只接受纯数字分量（无法表达预发布段），CMakeLists.txt
 # 的 project VERSION 不作为版本来源，与发布版本的对齐留给构建打包阶段。
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 description = "Professional Linux image toolbox"
 readme = "README.md"
 requires-python = ">=3.11"
