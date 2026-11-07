@@ -75,6 +75,28 @@
 > AI 模型安装/下载不在动作面（`ai.models.list` 只读）；工具页参数面板为
 > 参数 JSON 编辑器（逐工具表单化属后续批次）。
 
+> **Phase 9 进度备注（2026-11-07）**：编辑器补全垂直切片（检查器"变换"
+> 页签：裁剪八手柄 + 比例锁定 / 自由旋转防抖预览与应用 / 透视四角校正 /
+> 按目标尺寸缩放，经 `image.transform` 新式组合参数；标注画布模式八工具
+> 经 `image.annotate`；对比模式 AppCompareSlider；保存选项对话框
+> `image.save target_kb`）已在 `phase9-editing` 分支工作区实现（协议
+> docs/ipc-protocol.md §3.2/§3.9 Phase 9 增补 + Worker
+> image_adapter/dispatcher + C++ DocumentService.applyTransform/applyAnnotate
+> + QML EditorPage 变换页签与 AppCropOverlay/AppPerspectiveOverlay/
+> AppAnnotateOverlay/AppAnnotateToolbar/AppCompareSlider；截至本备注撰写
+> 未提交），状态口径 `code_complete / static_reviewed`（CHANGELOG Phase 9
+> 条目）。按本文件头部规则，§0/§1/§3 相关行状态仍为 **`待迁移`**，括注
+> 仅为进度说明而非状态档位；实机验收清单见 docs/phase9-acceptance.md
+> （变换页签端到端 / 标注八工具 绘制→提交→undo 参数化重放像素一致 /
+> 对比滑块 / 目标大小导出实测分步；实机项与 CI 已覆盖项分列），通过后
+> 统一改判 `已迁移` 并回填验收记录。该批不含：1.0 批量"按大小压缩"工具
+> （保存对话框 target_kb 只覆盖保存时单图 JPEG/WebP 目标大小，压缩实验室
+> 系各行不变）；`target_kb` 的 C++ 消费侧请求方向已随 2026-11-08 修复轮
+> 接线（saveDocument 第三参，EditorPage 直调三参），响应方向 `documentSaved`
+> 仍无 fileSize（保存完成 Toast 无实际大小显示，见 ipc-protocol.md §3.9 末
+> 消费侧复查注），目标大小导出实测见 phase9-acceptance.md §5（文件字节以
+> `stat` 核对）。
+
 ## 0. 全局功能（不属于单一工具）
 
 | 现有功能 | 旧入口 | Phase | 状态 |
@@ -85,7 +107,7 @@
 | 图像信息 | `app/main_window.py:2193`、`4101` | 4 第一批 | 待迁移 |
 | 撤销 / 重置 | `app/main_window.py:390, 406` | 4 第五批 | 待迁移（Phase 5 已实现 undo/redo/reset + HistoryModel——"新架构补 Redo"已落地，待实机验收） |
 | 缩放/平移/适配/100% | `app/preview_widget.py` | 4 第二批 | 待迁移（ImageCanvas 既有能力，Phase 5 编辑器接线缩放控件，待实机验收） |
-| 透明棋盘格 / 图像比较 | `app/preview_widget.py` / `2740` | 4 第二批 | 待迁移 |
+| 透明棋盘格 / 图像比较 | `app/preview_widget.py` / `2740` | 4 第二批 | 待迁移（透明棋盘格为 ImageCanvas 既有能力；Phase 9 已实现编辑器对比模式 AppCompareSlider——原图/当前图分割滑块、进入即禁用其他交互、Esc/再点退出，纵横比不同后按各自外接框居中不逐像素对位（辅助视图语义），待实机验收） |
 | 工具搜索 Ctrl+K | `app/main_window.py:600` | 3 | 待迁移 |
 | 主题 system/dark/light | `app/main_window.py:578` | 3 | 待迁移 |
 | 设置（字体/主题/并发/输出/后端诊断） | `app/main_window.py:485-520` | 3 | 待迁移 |
@@ -98,8 +120,8 @@
 | 现有功能 | 旧入口 | processors | 外部依赖 | Phase | 状态 |
 |---|---|---|---|---|---|
 | 调整（亮度/对比度/饱和度/伽马/曝光/色相/自然饱和度/高光阴影） | `_build_adjust_panel` `app/main_window.py:721` | `core.brightness/contrast/saturation/gamma/exposure/hue_shift/vibrance/highlights_shadows` | numpy/cv2 | 4 第三批 | 待迁移（Phase 5 已实现九键 image.adjust + 滑杆预览/应用，待实机验收） |
-| 裁剪（尺寸/中心/比例） | `1781` | `core.crop/center_crop/aspect_crop` | — | 4 第三批 | 待迁移 |
-| 变换（旋转/90°/翻转/缩放） | `1881` | `core.rotate/flip_h/flip_v/scale` | — | 4 第三批 | 待迁移（Phase 5 已接入旋转90°/水平翻转/垂直翻转；crop/scale 有协议支持、无 UI 入口，待实机验收） |
+| 裁剪（尺寸/中心/比例） | `1781` | `core.crop/center_crop/aspect_crop` | — | 4 第三批 | 待迁移（Phase 9 已实现画布交互式裁剪 AppCropOverlay：八向手柄/矩形整体拖动/重新拉框/三分线/比例锁定（自由、1:1、4:3、3:4、16:9、9:16），经 image.transform 组合参数应用；1.0 的尺寸/中心数值式裁剪面板未做，待实机验收） |
+| 变换（旋转/90°/翻转/缩放） | `1881` | `core.rotate/flip_h/flip_v/scale` | — | 4 第三批 | 待迁移（Phase 5 已接入旋转90°/水平翻转/垂直翻转；Phase 9 已实现"变换"页签：自由旋转（滑杆 300ms 防抖预览 + expand 两态应用）、透视四角校正（AppPerspectiveOverlay，输出画布 = 四角外接矩形）、按目标尺寸缩放（lanczos/bilinear/nearest/bicubic）——均经 image.transform 组合参数（DocumentService.applyTransform 嵌套线形），待实机验收） |
 | 滤镜（78 内置，可搜索调参预览） | `944` | `FilterDefRegistry` + `filters.ALL_FILTERS` | opencv/skimage | 4 第四批 | 待迁移（Phase 6A 已实现滤镜页签：目录浏览/搜索、FilterDef 参数控件、不可用滤镜置灰 + 原因、整链预览与应用；预览缓存未实现，待实机验收） |
 | 滤镜链（增删/排序/启停/预设持久化） | `1000-1244` | `filter_chain` + `filter_presets` | — | 4 第四批 | 待迁移（Phase 6A 已实现链增删/↑↓排序/启停与 `filter.presets.*` 四动作保存/加载/删除接线；拖拽排序未实现（↑/↓ 代替），待实机验收） |
 | LUT / 色调曲线 | `3096` | `lut.apply_lut/tone_curve`（.cube 加载 UI 未接） | — | 4 第四批 | 待迁移（补 .cube；Phase 7 协议新增 `lut.apply` 动作（.cube 解析失败提交前拒绝）并以工具页条目承载——参数 JSON 提交，逐工具表单化 UI 未做；色调曲线未迁移） |
@@ -129,7 +151,7 @@
 | 拼接/拼贴（横纵/网格/分割）+ 快速拼图 | `2910`、`4231` | `stitch.*` + `parity.contact-sheet/collage` | — | 5 | 待迁移 |
 | 分割/堆叠/切割 | `3763` | `parity.split-grid/stack/cut` | — | 5 | 待迁移 |
 | 形状蒙版 | `2643` | `shapes.apply_shape_mask` + `SHAPE_PRESETS` | — | 5 | 待迁移 |
-| 绘图/标注（文字/边框/自动裁边/水印） | `3910` | `parity.text/border/auto-crop/watermark` | Pillow | 5（绘图与标注） | 待迁移（Phase 7 协议仅收 `watermark.text` 文字水印并以工具页条目承载；文字/边框/自动裁边未注册） |
+| 绘图/标注（文字/边框/自动裁边/水印） | `3910` | `parity.text/border/auto-crop/watermark` | Pillow | 5（绘图与标注） | 待迁移（Phase 9 已实现编辑器标注画布模式：pen/text/rect/ellipse/arrow/blur_rect/pixelate_rect/eraser 八工具绘制 → `image.annotate` 全分辨率提交 + 参数化 undo 重放，待实机验收；文字水印此前经 Phase 7 `watermark.text` 工具页条目承载；1.0 的边框/自动裁边未注册） |
 | 调色板/颜色库（提取/取色/替换/PDF） | `3832` | `parity.palette/color-sample/color-replace/palette-pdf` | reportlab（PDF） | 5 | 待迁移 |
 
 ## 4. 批量工具（Phase 5）

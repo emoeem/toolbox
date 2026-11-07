@@ -82,17 +82,23 @@ target_include_directories(toolbox PRIVATE
     ${CMAKE_SOURCE_DIR}/native/graphics
 )
 
-# QML 模块登记：与 ui/ 下的实际文件一一对应（ui/components/ 29 个基础/布局/业务
-# 组件 + Main + Theme 单例 + 8 个页面），qt_add_qml_module 按此清单编译进
-# qrc:/Toolbox 模块；新增 .qml 必须同步登记，否则类型解析失败。
+# QML 模块登记：与 ui/ 下的实际文件一一对应（ui/components/ 40 个基础/布局/
+# 业务组件 + Main + Theme 单例 + 10 个页面），qt_add_qml_module 按此清单编译
+# 进 qrc:/Toolbox 模块；新增 .qml 必须同步登记并更新本计数，否则类型解析失败
+# （计数失准与文件遗漏同属清单错误，按此对账）。
 set(QML_FILES
     ui/Main.qml
     ui/themes/Theme.qml
     # Phase 6 第 7 项：批量处理向导（BatchPage 工作流组件）
     ui/components/AppBatchWizard.qml
+    # Phase 9 编辑器画布模式与变换/标注/对比组件（EditorPage 画布侧）
+    ui/components/AppAnnotateOverlay.qml
+    ui/components/AppAnnotateToolbar.qml
     ui/components/AppButton.qml
     ui/components/AppColorField.qml
+    ui/components/AppCompareSlider.qml
     ui/components/AppContextMenu.qml
+    ui/components/AppCropOverlay.qml
     ui/components/AppDialog.qml
     # Phase 5 流程 2：滤镜页签业务组件
     ui/components/AppFilterCard.qml
@@ -105,6 +111,7 @@ set(QML_FILES
     ui/components/AppInspectorPanel.qml
     ui/components/AppNumberField.qml
     ui/components/AppPanelHeader.qml
+    ui/components/AppPerspectiveOverlay.qml
     ui/components/AppProgressIndicator.qml
     ui/components/AppSearchField.qml
     ui/components/AppSectionGroup.qml

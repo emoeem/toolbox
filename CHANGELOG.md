@@ -1,5 +1,138 @@
 # Changelog
 
+## 2026-11-07 (Phase 9 — 编辑补全：组合变换页签 / 标注 / 对比滑块 / 目标大小导出)
+
+Phase 9（分支 `phase9-editing`）编辑器补全批次，三个协议面增补 + 消费侧
+接线：**① `image.transform` 新式组合参数**（ipc-protocol.md §3.2 增补）——
+请求可省略 `op`，改携带 `crop` / `rotate_free` / `perspective` / `scale`
+组合对象（顶层线形与嵌套 `params` 线形等价接受，与既有 `op`/`params` 线形
+互斥），执行顺序 crop → rotate_free → scale（perspective 为独立几何变换）；
+引擎映射：crop/scale 复用 `processors/core.py` 既有资产（bicubic 词表映射
+core 的 cubic）、rotate_free 用 PIL `Image.rotate`（BICUBIC，expand 两态，
+露出底面 RGBA 透明/RGB 黑）、perspective 用 cv2 `getPerspectiveTransform` +
+`warpPerspective`（输出画布 = 目标四点外接矩形上取整）——core.rotate 仅覆盖
+扩张画布的仿射旋转，无 `expand=false` 与投影变换资产，不重写不虚标。
+**② `image.annotate` 新动作**（§3.9）——八种标注 op（pen/text/rect/ellipse/
+arrow/blur_rect/pixelate_rect/eraser）依序应用到文档像素，ops 提交前同步
+校验（消息带下标）、逐 op 进度与协作取消、坐标一律画布像素坐标、颜色词汇
+`[r,g,b(,a)]` / `#RGB/#RRGGBB/#RRGGBBAA`（alpha < 255 经透明图层
+alpha_composite 混色）、eraser 恢复源图（open 态）基线像素（几何不一致时
+降级为只擦同批更早 ops）；rect/ellipse 几何 `width`/`height` 与描边
+`stroke_width` 异名（任务书字面 schema 重复 `width` 键按此消解，三端同源）。
+**③ `image.save` 新增可选 `target_kb`**（§3.9）——二分 JPEG/WebP quality
+（闭区间 [30,100] 取满足 `target_kb×1024` 的最大值，≤7 次探测，探测与落盘
+同参同 `processors/utils.py save_image`），保 alpha 用 WebP（含 alpha 文档
+请求 `.jpg` → 提交前 `INVALID_PARAMS`），下限 30 仍超预算按 30 落盘并如实
+返回实际字节，响应附加 `{quality, bytes}`（`bytes` 与 `file_size` 同源），
+无 `target_kb` 的请求响应形状逐字节不变。**参数化历史扩展**（§3.3）：组合
+变换以"快照 + replay"入历史（确定性函数，undo/redo 参数化重放逐位一致，
+其上的 filter.apply / image.annotate 不再被屏障退化）；annotate 为参数化
+条目（只存归一化 ops）；既有 `op`/`params` 形式 transform 仍是快照条目
+（重放屏障），行为逐字节不变——纯新增可选参数/新动作，`protocol` 保持 `1`
+（§8 兼容性规则，既有请求不携带新键则行为不变）。
+
+消费侧（C++/QML）：`DocumentService` 新增 `applyTransform(params, preview,
+maxSide)`（组合对象原样透传，嵌套线形；空 params 本地拒绝）与
+`applyAnnotate(ops)`（原样透传，只全分辨率、空 ops 本地拒绝），完成路径
+复用 version/modified 状态机；EditorPage 新增"变换"页签（自由旋转 300ms
+防抖预览走既有 previewReady 通道 / 缩放四 resample / 裁剪与透视画布模式
+入口；旋转90°/翻转按钮并入页签）、四个画布模式组件（AppCropOverlay 八向
+手柄 + 整体拖动 + 重新拉框 + 三分线 + 比例锁定自由/1:1/4:3/3:4/16:9/9:16、
+AppPerspectiveOverlay 四角拖拽、AppAnnotateOverlay 采集 + Canvas 近似预览
+层、AppAnnotateToolbar 八工具参数浮条）、对比模式 AppCompareSlider（原图/
+当前图分割滑块）、保存选项对话框（目标大小 KB，"空=不限"以开关关闭表达）。
+画布四模式互斥、激活期间视图冻结（叠加层吞事件 + 检查器/缩放禁用双保险），
+QML 不做像素计算（几何应用全部经 DocumentService 异步任务）。
+
+如实边界：**`target_kb` 的 C++ 消费侧请求方向已接线**（2026-11-08 修复轮：
+`saveDocument` 三参 `(path, quality, targetKb)`，>0 随请求携带 target_kb；
+EditorPage 直调三参，原 try/catch 回退路径移除——该回退注释曾把
+"Q_INVOKABLE 多余实参同步抛 TypeError"写成定论而未实机核实）；**响应方向
+仍未接线**：`documentSaved` 只携带 `path`，保存完成 Toast 不显示实际大小
+（ipc-protocol.md §3.9 末消费侧复查注）；目标大小导出实测见验收清单 §5
+（文件字节以 `stat` 核对）。标注无 Worker 预览形态（画布所见为本地 Canvas
+近似层，最终像素以提交后为准）；`text` 字形跨平台有差异（字体候选链
+MiSans → Noto CJK → DejaVu → PIL 内置，与水印同源）。
+
+修复轮（2026-11-08，评审发现第 1 轮，随本批同工作树落地）：① EditorPage
+自由旋转 expand 输出尺寸推演改为 Worker 实际引擎 PIL `Image.rotate` 的输出
+尺寸（pilRotateExpandedSize：0/90/180/270 走 transpose/copy 快速路径精确
+换轴，其余角按角点外接框公式 ceil(max(xx))−floor(min(xx))，矩阵分量
+round(·,15) 同源——原 cv2 截断公式与 Worker 输出在多数非 90° 倍角上差
+1–2 px，文档尺寸镜像系统性偏差）；② eraser 基线恢复的降级
+条件改为"几何不一致"（通道数不一致按基线前 C 通道恢复——源图恒 RGBA、
+adjust 后画布为 RGB，原 `shape` 全等判定使调整后橡皮静默不恢复，§3.9
+eraser 行同步）；③ RGB 画布上 alpha < 255 混色恒用 4 元组墨水经 RGBA 图层
+合成（原 3 元组墨水使半透明退化为不透明落笔，§3.9 颜色注同步）；④ 画布
+模式入口（crop/perspective/annotate）补 refreshPending 门控（全分辨率应用
+完成 → 刷新预览到达窗口期的 k 因子失配不可进入拉框）；⑤ CMakeLists QML
+清单头注计数更新（40 组件/10 页面）。
+
+状态口径（总纲 §14.2）：本批全部为 **code_complete / static_reviewed**。
+本机为 Windows 编码环境且按角色纪律未运行任何测试/构建（无解释器/无构建
+链，既有条目同口径）；Python 侧测试随 CI `unittest discover` 执行，native
+测试随 CTest `document_service` 既有目标执行，结果以 GitHub Actions 为准。
+Linux 目标环境验收清单见 `docs/phase9-acceptance.md`（变换页签端到端 /
+标注八工具 绘制→提交→undo 参数化重放像素一致 / 对比滑块 / 目标大小导出
+实测分步 / 实机项与 CI 已覆盖项分列），未执行任何目标环境运行验证；迁移
+矩阵对应行按其状态取值规则保持 **待迁移**（ui-migration-matrix.md Phase 9
+进度备注）。
+
+### Added（协议与 Worker）
+
+- `python_worker/adapters/image_adapter.py`：组合参数校验与执行
+  （`validate_transform_spec` / `apply_composite_transform` /
+  `_rotate_free` / `_perspective_warp`，`COMPOSITE_TRANSFORM_KEYS` 词表）；
+  标注校验与执行（`validate_annotate_ops` / `apply_annotate` + 八 op 专用
+  校验器，颜色归一含 alpha、PIL 圆头端点、箭头 ±150° 头线确定性几何、
+  区域裁剪与"完全在图像外"拒绝）；`validate_save_target` /
+  `encode_image_size` / `search_quality_for_target`（target_kb 二分）；
+  `DocumentStore.save` 增加 `target_kb`/`cancel_token` 形参（响应附加
+  quality/bytes）；`HistoryEntry` replay 载荷新增 `transform`（快照 + replay
+  并存）与 `annotate`（参数化条目）两类，`_replay_apply` 新增两类别重放与
+  `baseline` 形参（eraser 源图基线随行）；扩展既有 `HistoryEntry`/`_push_history`
+  注释口径（组合 transform 属"两者并存"的快照条目）。
+- `python_worker/dispatcher.py`：动作表注册 `image.annotate`；
+  `_image_transform_job` 组合线形分发（顶层/嵌套双形状，与 op/params 混用
+  同步拒绝）；`_composite_transform_job`（预览走 write_preview 既有通道、
+  全分辨率快照 + replay 入历史）；`_image_annotate_job`（标准异步任务，
+  先算后提交）；`_image_save_job` target_kb 分支（扩展名/alpha/文档存在性
+  提交前校验，target_kb 优先于 quality）。
+
+### Added（C++ / QML 消费侧）
+
+- `native/core/document_service.{h,cpp}`：`applyTransform` /
+  `applyAnnotate` 两个 Q_INVOKABLE（PendingKind::ApplyTransform /
+  ApplyAnnotate，组合对象与 ops 数组原样透传不做改写；空参数/空 ops/无文档
+  本地拒绝且恰好一次 documentActionFailed——applyFilters 空链同款契约）；
+  预览/完成路径与 adjust/transform 共用（预览只发 previewReady，全分辨率
+  递增 version 置 modified，无像素文件）；`saveDocument` 扩展第三参
+  `targetKb`（2026-11-08 修复轮，>0 随请求携带 target_kb，<=0 请求形状与
+  两参调用逐字节一致）。
+- `ui/components/AppCropOverlay.qml`、`AppPerspectiveOverlay.qml`、
+  `AppAnnotateOverlay.qml`、`AppAnnotateToolbar.qml`、
+  `AppCompareSlider.qml`（新文件，均只持本地状态与信号、不触碰
+  DocumentService——AppFilterInspector 同款纪律）；`ui/pages/EditorPage.qml`
+  扩展（变换页签 + 画布模式互斥与视图冻结 + 标注/对比/保存选项接线，
+  几何应用后按确定性输出尺寸本地推演文档尺寸镜像）；`CMakeLists.txt`
+  注册五个 QML 组件。
+
+### Added（测试）
+
+- `tests/test_worker_transform.py`（新文件，23 用例）与
+  `tests/test_worker_annotate.py`（新文件，19 用例，含 2026-11-08 修复轮
+  2 例），进程内 Dispatcher + TaskRuntime 风格（同 test_worker_edit.py）：
+  覆盖说明见 docs/phase9-acceptance.md §1（既有 op 兼容回归与重放屏障不变、
+  组合参数校验/执行顺序/确定性/预览/参数化历史、target_kb 收敛与如实边界、
+  标注八 op 像素效应与 alpha 混色（含 RGB 画布）、eraser 基线语义（含通道
+  不一致恢复）、参数化 undo/redo 逐位一致、提交前同步校验与任务生命周期）。
+  其中 4 组为本批复核对补齐：rotate_free 露出底面两态、target_kb 探测边界
+  取消、标注 alpha 第 4 分量、组合锚点之上 annotate 保持参数化；修复轮
+  2 组：RGB 画布 alpha 混色、通道不一致基线的 eraser 恢复。
+- `tests/native/test_document_service.cpp`：Phase 9 三用例（本地拒绝契约 /
+  applyTransform 分发与预览·完成两态 / applyAnnotate 分发与失败上报），
+  ride 既有 `document_service` CTest 目标。
+
 ## 2.0.0-alpha.2（2026-11-08 发布）
 
 v2.0.0-alpha.1 实机反馈的两项修复 + 一项永久质量门禁：
@@ -34,6 +167,7 @@ v2.0.0-alpha.1 实机反馈的两项修复 + 一项永久质量门禁：
 - 实机反馈的 `AppButton is not a type` 在本版构建中尚未在本机复现
   （Windows 主机无 Qt 运行时）；QML 烟雾门禁上线后以 CI offscreen 加载
   结果为准——若 CI 复现，修复随本标签循环完成后再发布。
+
 
 ## 2.0.0-alpha.1（2026-11-07 发布）
 

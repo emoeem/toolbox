@@ -127,7 +127,7 @@ Worker 启动参数：
 | `image.open` | sync | `{path}` | `{document_id, width, height, format, file_size}` |
 | `image.close` | sync | `{document_id}` | `{closed: true}` |
 | `image.metadata` | sync | `{document_id}` | `{width, height, format, mode, source, modified}` |
-| `image.save` | async | `{document_id, path, quality?}` | `{saved: true, path, file_size}` |
+| `image.save` | async | `{document_id, path, quality?, target_kb?}` | `{saved: true, path, file_size}`；`target_kb` 给定时附加 `{quality, bytes}`（§3.9） |
 | `filter.list` | sync | `{}` | `{filters: [{key, name, category, params, available, optional_deps, description}]}` |
 | `filter.presets.list` | sync | `{}` | `{presets: [{name, step_count}]}`（§3.4） |
 | `filter.presets.save` | sync | `{name, steps: [{filter_key, params, enabled}]}` | `{saved: true, name}`（steps 逐项经 `FilterStep.from_dict` 校验，非法 → `INVALID_PARAMS`，§3.4） |
@@ -136,7 +136,8 @@ Worker 启动参数：
 | `filter.preview` | async | `{document_id, filters: [{filter_key, params, enabled}], max_side?}` | `{path, width, height, sha256, preview_of}` |
 | `filter.apply` | async | `{document_id, filters: [...]}` | `{width, height, version}`（文档像素被更新，`modified=true`；`version` 规则见 §3.1） |
 | `image.adjust` | async | `{document_id, adjustments: {brightness?, contrast?, saturation?, gamma?, exposure?, hue?, vibrance?, highlights?, shadows?}, preview, max_side?}` | `{version, width, height, path?, sha256?}`（§3.2；`preview=true` 时含 `path/sha256`） |
-| `image.transform` | async | `{document_id, op, params, preview, max_side?}` | 同 `image.adjust`；`op`/`params` 约束见 §3.2 |
+| `image.transform` | async | `{document_id, op, params, preview, max_side?}`，或组合线形 `{document_id, crop?, rotate_free?, perspective?, scale?, preview, max_side?}` / `{document_id, params: {crop?, …}, preview, max_side?}` | 同 `image.adjust`；`op`/`params` 约束与组合参数两线形见 §3.2 |
+| `image.annotate` | async | `{document_id, ops: [{type, …}]}` | `{version, width, height}`（文档像素被更新，`modified=true`，`version` 规则见 §3.1；`ops` 元素 schema 见 §3.9） |
 | `image.undo` | async | `{document_id}` | `{version, width, height, path, sha256}`（栈空 → 同步 `UNREDOABLE`，§3.3） |
 | `image.redo` | async | `{document_id}` | 同 `image.undo` |
 | `image.reset` | async | `{document_id}` | 同 `image.undo`（恢复初始状态并清空历史） |
@@ -183,6 +184,20 @@ Worker 启动参数：
 | `ai.models.list` | sync | `{task?}` | `{models, backends, cache_root, model_paths}`（§3.8） |
 
 动作集合按阶段扩展（总纲 §6.2）；禁止各页面私自定义协议动作。
+
+Phase 9（分支 `phase9-editing`）本轮增补：§3.2 的 `image.transform` 新式组合
+参数、§3 新增 `image.annotate`（§3.9）与 `image.save` 新增 `target_kb` 可选
+参数（§3.9）。仍为纯新增：既有 `op`/`params` 形式与既有参数语义不变（既有
+请求不携带新键、行为逐字节不变），新响应字段只在携带新参数时出现，`protocol`
+保持 `1`（§8 兼容性规则）。Python 侧实现于 `python_worker/adapters/image_adapter.py`
+与 `python_worker/dispatcher.py`（动作表），测试锁为 `tests/test_worker_transform.py`
+与 `tests/test_worker_annotate.py`。C++/QML 消费侧随同一 Phase 9 批次交付
+（`native/core/document_service` 的 `applyTransform` 组合线形 / `applyAnnotate`
+入口与 `ui/pages/EditorPage.qml`、`ui/components/AppAnnotateOverlay.qml` 等
+变换/标注页签组包——组合键嵌在 `params` 下透传，Worker 双线形接受，见 §3.2；
+annotate ops 形状与 §3.9 schema 逐字段一致，rect/ellipse 的几何
+`width`/`height` 与描边 `stroke_width` 异名口径同源）。纯新增动作与可选参数
+对未接线的既有 C++ 消费方按 §2.3"忽略未知字段"口径兼容。
 
 本轮增补为**纯新增动作 + `filter.apply` 结果新增 `version` 字段**：不删除字段、
 不改既有字段语义，`protocol` 保持 `1`（符合 §8 兼容性规则）。
@@ -303,6 +318,41 @@ QML 参数面板（AppFilterParameterGroup）对 color 类型发送 hex 文本�
 `result` 形状相同；`width/height`：预览时为预览图尺寸，全分辨率时为应用后的
 文档尺寸（`rotate` / `scale` / `crop` 会改变尺寸）。
 
+Phase 9 增补——**新式组合参数形式**：请求可省略 `op`，改为携带下列组合对象，
+**两种线形等价接受**（与既有 `op`/`params` 线形互斥，混用 → `INVALID_PARAMS`；
+一个组合键也不带仍按既有路径报"未知变换 op"）：
+
+- 顶层线形：`{document_id, crop?, rotate_free?, perspective?, scale?, preview,
+  max_side?}`（组合键直接作顶层可选对象，文档主形状）；
+- 嵌套线形：`{document_id, params: {crop?, rotate_free?, perspective?,
+  scale?}, preview, max_side?}`（组合对象嵌在 `params` 键下——C++
+  `DocumentService.applyTransform` 的原样透传形状；双形状接受同 §3.7
+  `generate.render` 的 `generator_key`/`generator` 别名口径）。
+
+既有五个 `op` 的语义不变：
+
+| 参数 | 形状 | 说明 |
+|---|---|---|
+| `crop` | `{x, y, width, height}` | 裁剪矩形（像素）；负值、`width`/`height` ≤ 0 或越界 → `INVALID_PARAMS`（提交前同步判定） |
+| `rotate_free` | `{angle, expand?}` | 自由旋转，`angle` ∈ [-180, 180] 度（正角逆时针，与 `op=rotate` 同约定）；`expand` 缺省 `true`（画布扩到包容整图；`false` 保持原尺寸、越出部分裁掉）；旋转露出的底面：RGBA 透明、RGB 黑 |
+| `perspective` | `{corners: [[x,y]×4]}` | 透视变换：文档四角 `(0,0)/(w,0)/(w,h)/(0,h)`（左上起顺时针）映射到 `corners[0..3]`；坐标可为任意有限数（含负/出界），输出画布 = 目标四点外接矩形（上取整）；**独立变换**，与其它组合参数并存 → `INVALID_PARAMS` |
+| `scale` | `{width, height, resample?}` | 缩放到目标像素尺寸（`width`/`height` > 0 整数）；`resample` ∈ `lanczos \| bilinear \| nearest \| bicubic`，缺省 `lanczos` |
+
+- **执行顺序**：`crop → rotate_free → scale`（文档写明；`perspective` 独立，
+  不参与组合）。`crop` 的越界判定以**当前文档图像**为基准（它恒为链首）。
+- **引擎映射**（复用/补齐既有资产）：`crop` 复用 `processors/core.py` crop、
+  `scale` 复用其 `resize`（`bicubic` 词表映射到 core 的 `cubic`）；`rotate_free`
+  用 PIL `Image.rotate`（BICUBIC）、`perspective` 用 cv2
+  `getPerspectiveTransform` + `warpPerspective`（BILINEAR）——core.rotate 仅
+  覆盖扩张画布的仿射旋转，无 `expand=false` 与投影变换资产。
+- **参数化历史**：全分辨率组合变换以"快照 + replay"入历史（`HistoryEntry`
+  的 pixels 与 replay 并存，同 `image.adjust` 口径）：组合变换是确定性函数
+  （同输入同参数 → 逐位同输出），undo/redo 从锚点参数化重放；其上的
+  `filter.apply` / `image.annotate` 参数化条目**不再**被屏障退化。既有
+  `op`/`params` 形式仍为无 replay 的快照条目（重放屏障，§3.3），行为不变。
+- 提交前同步判定（不产生 task_id）：`UNKNOWN_DOCUMENT`、`op` 与组合参数混用、
+  各参数形状/取值非法（含 crop 越界）。
+
 ### 3.3 文档历史（image.undo / image.redo / image.reset / image.history）
 
 每个文档在 Worker 内持有一份历史栈（像素快照留在 Worker 进程内，不跨进程
@@ -350,9 +400,11 @@ result、history result 均与上文一致，`protocol` 保持 `1`），仅可�
    （协议 `filters` 数组的深拷贝），不保留像素快照；`image.undo` 对参数化
    条目从重放基线（源图 open 态）或最近的快照锚点重放链复原像素，重放
    复用与原应用同一条运行路径（`FilterChain` + `run_filter_chain_sync`），
-   确定性逐位一致。像素快照仅保留给不可参数化操作（`image.transform` /
-   crop 类，scale/crop 有损、参数重放不可靠——"重放屏障"；其上的链条目
-   退化为快照条目）。全分辨率 `image.adjust` 条目仍是快照条目，但额外
+   确定性逐位一致。像素快照仅保留给不可参数化操作（既有 `op`/`params`
+   形式的 `image.transform`——scale/crop 有损、参数重放不可靠，"重放屏障"，
+   其上的链条目退化为快照条目；Phase 9 起新式组合参数的 `image.transform`
+   与 `image.annotate` 为确定性可重放动作，见 §3.2/§3.9）。全分辨率
+   `image.adjust` 条目仍是快照条目，但额外
    携带 adjustments 作重放参数（可无损确定性重放），使其上的链条目可以
    参数化。内存从 O(像素×历史) 降到 O(参数)（8000×5000 大图 undo 的主要
    出路）；字节预算（§3.3 上文，512MB）只计快照条目。对协议的可见影响：
@@ -732,6 +784,86 @@ Phase 7 复查（2026-11-07，与本节实现逐字段核对后的两处措辞�
 `test_crypto_dependency_missing`），上文"核心依赖不列为 optional_deps"
 清单中据此移除 `cryptography`（pypdf 确不参与探测——pdf.* 条目
 `deps` 恒空）。
+
+### 3.9 标注与定向保存（image.annotate / image.save target_kb，Phase 9 增补）
+
+#### image.annotate（async）
+
+`{document_id, ops: [...]}` → 受理 `{task_id, status}`；完成 result
+`{version, width, height}`（全分辨率应用到文档：`modified=true`、
+`version += 1`，§3.1）。标准异步任务：进度（逐 op 上报，§7 节流照旧）与
+协作取消（逐 op 边界检查点）适用 §2.3/§7 全部语义，取消以 `task.failed`
+（`CANCELLED`）收尾且文档状态不动（先算后提交）。
+
+`ops` 为**非空数组**，元素按序应用到当前文档像素上。**坐标一律为原图像素
+坐标**（当前画布空间，原点左上；可为有限小数，绘制按 PIL 语义栅格化）。
+ops 元素 schema（`type` 决定其余键；未知 `type`、缺键、取值非法 →
+提交前同步 `INVALID_PARAMS`，消息带 ops 下标）：
+
+| `type` | 键 | 说明 |
+|---|---|---|
+| `pen` | `points: [[x,y]×n]`（n≥2）, `color`, `width` | 折线笔触（圆头端点、curve 关节），`width` ≥ 1 整数 |
+| `text` | `x`, `y`, `text`（非空字符串）, `font_size`（1..512 整数）, `color` | 文本绘制在 (x,y)（左上基准，PIL text 语义）；字体候选链与水印一致（MiSans → Noto CJK → DejaVu → PIL 内置），跨平台字形有差异、像素结果不跨机锁定 |
+| `rect` | `x`, `y`, `width`, `height`, `color`, `stroke_width?`, `fill?` | 矩形；`width`/`height` > 0 为几何尺寸；`stroke_width` 缺省 1（≥1 整数）；`fill` 缺省 `false`（`true` 实心填充）。**键名说明**：几何 `width` 与描边线宽不能同名（JSON 单键），描边为 `stroke_width`——任务书字面 schema 的第二个 `width` 按此消解 |
+| `ellipse` | 同 `rect` | 椭圆（x/y/width/height 为外接矩形） |
+| `arrow` | `x1`, `y1`, `x2`, `y2`, `color`, `width` | 从 (x1,y1) 到 (x2,y2) 的箭头：主线 + 两段头线（与前进方向成 ±150°，长度 `max(6, 3×width)`，确定性几何） |
+| `blur_rect` | `x`, `y`, `width`, `height`, `strength` | 区域高斯模糊（PIL `GaussianBlur`，`strength` = radius ∈ (0, 100]）；区域按图像边界裁剪，完全在图像外 → `INVALID_PARAMS` |
+| `pixelate_rect` | `x`, `y`, `width`, `height`, `block` | 区域马赛克：先按 `block`（≥2 整数）整除缩小（NEAREST）再放大回原尺寸；区域裁剪规则同 `blur_rect` |
+| `eraser` | `points: [[x,y]×n]`（n≥2）, `width` | 橡皮：把笔画覆盖的像素恢复为**源图（open 态）基线像素**（基线与画布**通道数**不一致——源图恒 RGBA、`image.adjust` 后画布为 RGB——时按基线前 C 通道恢复，RGB 分量逐位对应；2026-11-08 修复轮明确并锁定测试）；源图与当前画布**几何**不一致（open 后发生过 crop/scale 等几何变换）时不恢复——该笔画只等效于"恢复本动作应用前像素"（可擦除同批次更早 ops 的绘制结果） |
+
+- `color` 词汇与 §3.7 Phase 6C 复查注一致：`[r,g,b]` 0-255 整数数组或
+  `#RGB`/`#RRGGBB` hex 文本；标注另接受第 4 分量 alpha（`[r,g,b,a]` /
+  `#RRGGBBAA`），缺省不透明（255）。alpha < 255 时经透明图层
+  alpha_composite 混色到画布——混色绘制恒发生在 RGBA 透明图层上、恒用完整
+  4 元组墨水，RGB 画布（adjust 后）无例外：合成后按画布模式转回 RGB
+  （半透明不得退化为不透明落笔；2026-11-08 修复轮修正并锁定测试）。
+- 绘制类（pen/text/rect/ellipse/arrow/eraser）允许坐标部分越界（PIL 自动
+  裁剪）；`rect`/`ellipse`/`blur_rect`/`pixelate_rect` 的 `width`/`height`
+  必须 > 0。
+- **参数化历史**：ops 归一化结果整体序列化进历史条目（参数化条目，只存
+  参数不存像素）；undo/redo 从基线/最近快照锚点**重绘 ops 前缀**（复用
+  §3.3 既有参数化 undo 机制；eraser 重放所需的源图基线由重放器随行传入）。
+  栈顶是不可重放快照（既有 `op` 形式的 `image.transform`）时本条目照旧
+  退化为快照条目（重放屏障，§3.3）。绘制为确定性函数：undo → redo 往返
+  逐位一致。
+- 提交前同步判定（不产生 task_id）：`UNKNOWN_DOCUMENT`、`ops` 缺失/为空/
+  形状非法、逐 op 参数非法。
+
+#### image.save 的 target_kb（可选参数）
+
+`image.save` 请求新增可选 `target_kb: int`（> 0）：
+
+- 给定时 Worker 二分 JPEG/WebP `quality`（闭区间 [30, 100]，取满足字节数
+  的**最大** quality）：按 `target_kb × 1024` 字节预算探测，直到 ≤ 预算或
+  quality 到下限 30。下限 30 仍超预算时按 30 落盘，响应如实返回实际字节
+  （不失败、不谎报达标）。
+- 编码器由 `path` 扩展名决定：`.jpg`/`.jpeg` → JPEG、`.webp` → WebP；
+  **保 alpha 用 WebP**——文档含 alpha 通道（4 通道）时请求 `.jpg`/`.jpeg`
+  → 提交前同步 `INVALID_PARAMS`；其它扩展名（如 `.png`，无损无 quality 旋钮）
+  → `INVALID_PARAMS`。`target_kb` 与 `quality` 同时给出时 `target_kb` 优先
+  （`quality` 被忽略）。
+- 响应在既有 `{saved, path, file_size}` 之上**附加** `{quality, bytes}`：
+  `quality` 为最终落盘质量，`bytes` 为落盘后真实文件大小（与 `file_size`
+  同源；探测值不以估计形式返回）。不携带 `target_kb` 的请求响应形状
+  逐字节不变（无新字段）。
+- 探测编码与最终落盘同参（JPEG `optimize=true`、WebP `method=4`，同
+  `processors/utils.py save_image`），搜索结果与文件大小一致；二分 ≤ 7 次
+  探测，取消在探测边界检查点生效（§7）。
+
+`target_kb` 消费侧复查注（2026-11-07，三端逐字段核对；2026-11-08 修复轮
+更新）：Worker 侧（dispatcher.py `_image_save_job` target_kb 分支、
+image_adapter.py `validate_save_target`/`search_quality_for_target`/
+`encode_image_size`）与本节逐字段一致。C++ 消费侧：请求方向已接线——
+`DocumentService::saveDocument` 现为 `(path, quality, targetKb = -1)` 三参
+（2026-11-08 修复轮补齐，native/core/document_service.cpp），`targetKb > 0`
+时随请求携带 `target_kb`，`targetKb <= 0` 时不携带该字段（与既有两参调用
+请求形状逐字节一致）；EditorPage 保存选项对话框按三参直调（此前批次的
+"参数不匹配同步抛 TypeError → try/catch 回退"防御路径已随本接线移除——
+该注释曾把 QV4 对多余实参的静默丢弃行为误写为定论，见 phase9-acceptance.md
+§8）。响应方向仍未接线：`documentSaved` 信号只携带 `path`
+（native/core/document_service.h），保存完成 Toast 的实际大小显示待其
+`fileSize` 扩展（EditorPage 已按 undefined 兼容，扩展落地后自动生效）。
+协议面不受影响：不携带 `target_kb` 的既有消费方响应不含新字段（§2.3 兼容）。
 
 ## 4. 大图数据传递（总纲 §6.3）
 
