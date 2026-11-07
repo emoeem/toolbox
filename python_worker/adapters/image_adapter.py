@@ -1002,8 +1002,13 @@ def _apply_annotate_op(canvas, op: dict[str, Any], baseline_arr: np.ndarray | No
     # 恒用完整 4 元组（3 元组在图层上等价 alpha=255，alpha_composite 后
     # 半透明语义退化为不透明落笔；§3.9 alpha 混色无 RGB 画布例外）。
     # alpha == 255 直绘画布：RGBA 画布携带 alpha 通道绘制；RGB 画布剥离为
-    # 三元组（4 元组在 RGB 画布上不是合法颜色）。
-    paint_color = color if (alpha < 255 or canvas.mode == 'RGBA') else color[:3]
+    # 三元组（4 元组在 RGB 画布上不是合法颜色）。无色 op（eraser/blur_rect/
+    # pixelate_rect，校验器不注入 color）不取墨水：RGB 画布上 color 为 None，
+    # color[:3] 不可求值（'NoneType' object is not subscriptable —— CI 上
+    # eraser-after-adjust 即因此 task.failed）；此类 op 也不用墨水。
+    paint_color = None
+    if color is not None:
+        paint_color = color if (alpha < 255 or canvas.mode == 'RGBA') else color[:3]
 
     def _paint(paint_fn) -> None:
         if alpha < 255:
