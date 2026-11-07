@@ -766,20 +766,21 @@ void TestDocumentService::applyTransformAndAnnotateLocalRejections() {
     QCOMPARE(h.backend.sendAction(QStringLiteral("probe.before")), reqId(1));
     // 无文档：全分辨率与预览两种形态都本地拒绝（action 各自带/不带 -preview
     // 后缀，QML 门控据此区分在途提交与预览提交的失败）。
-    h.service.applyTransform(QJsonObject{
-        {QStringLiteral("crop"),
-         QJsonObject{{QStringLiteral("x"), 10}, {QStringLiteral("y"), 10},
-                     {QStringLiteral("width"), 800}, {QStringLiteral("height"), 600}}}},
+    h.service.applyTransform(
+        QJsonObject{{QStringLiteral("crop"), QJsonObject{{QStringLiteral("x"), 10},
+                                                         {QStringLiteral("y"), 10},
+                                                         {QStringLiteral("width"), 800},
+                                                         {QStringLiteral("height"), 600}}}},
         false, -1);
     h.service.applyTransform(
         QJsonObject{{QStringLiteral("rotate_free"),
                      QJsonObject{{QStringLiteral("angle"), 15}, {QStringLiteral("expand"), true}}}},
         true, 512);
-    h.service.applyAnnotate(QJsonArray{QJsonObject{
-        {QStringLiteral("type"), QStringLiteral("pen")},
-        {QStringLiteral("points"), QJsonArray{QJsonArray{1, 2}, QJsonArray{3, 4}}},
-        {QStringLiteral("color"), QStringLiteral("#ff0000")},
-        {QStringLiteral("width"), 4}}});
+    h.service.applyAnnotate(QJsonArray{
+        QJsonObject{{QStringLiteral("type"), QStringLiteral("pen")},
+                    {QStringLiteral("points"), QJsonArray{QJsonArray{1, 2}, QJsonArray{3, 4}}},
+                    {QStringLiteral("color"), QStringLiteral("#ff0000")},
+                    {QStringLiteral("width"), 4}}});
     // 空参数/空 ops：与无文档无关，同样本地拒绝（先于无文档判定，
     // applyFilters 空链先例）。
     h.service.applyTransform(QJsonObject{}, false, -1);
@@ -823,9 +824,10 @@ void TestDocumentService::applyTransformDispatchAndCompletion() {
 
     // 全分辨率组合变换（crop + rotate_free 组合，Phase 9 执行顺序归 Worker）。
     const QJsonObject combo{
-        {QStringLiteral("crop"),
-         QJsonObject{{QStringLiteral("x"), 10}, {QStringLiteral("y"), 10},
-                     {QStringLiteral("width"), 800}, {QStringLiteral("height"), 600}}},
+        {QStringLiteral("crop"), QJsonObject{{QStringLiteral("x"), 10},
+                                             {QStringLiteral("y"), 10},
+                                             {QStringLiteral("width"), 800},
+                                             {QStringLiteral("height"), 600}}},
         {QStringLiteral("rotate_free"),
          QJsonObject{{QStringLiteral("angle"), 15}, {QStringLiteral("expand"), true}}},
     };
@@ -837,8 +839,8 @@ void TestDocumentService::applyTransformDispatchAndCompletion() {
     QCOMPARE(model.index(0, 0).data(TaskModel::StatusRole).toString(), QStringLiteral("queued"));
     emit h.backend.taskEvent(
         completedEvent(QStringLiteral("task-t1"), QJsonObject{{QStringLiteral("version"), 1},
-                                                             {QStringLiteral("width"), 800},
-                                                             {QStringLiteral("height"), 600}}));
+                                                              {QStringLiteral("width"), 800},
+                                                              {QStringLiteral("height"), 600}}));
     QCOMPARE(h.service.currentVersion(), 1);
     QVERIFY(h.service.documentModified());
     QCOMPARE(versionChanged.count(), 1);
@@ -905,8 +907,8 @@ void TestDocumentService::applyAnnotateDispatchAndFailure() {
     QCOMPARE(model.index(0, 0).data(TaskModel::NameRole).toString(), QStringLiteral("应用标注"));
     emit h.backend.taskEvent(
         completedEvent(QStringLiteral("task-an1"), QJsonObject{{QStringLiteral("version"), 1},
-                                                              {QStringLiteral("width"), 800},
-                                                              {QStringLiteral("height"), 600}}));
+                                                               {QStringLiteral("width"), 800},
+                                                               {QStringLiteral("height"), 600}}));
     QCOMPARE(h.service.currentVersion(), 1);
     QVERIFY(h.service.documentModified());
     QCOMPARE(versionChanged.count(), 1);
@@ -917,8 +919,7 @@ void TestDocumentService::applyAnnotateDispatchAndFailure() {
     // 失败路径：未落定动作按提交上下文上报恰好一次（QML 在途门控据此解锁）。
     h.service.applyAnnotate(ops);
     h.acceptAsync(4, QStringLiteral("task-an2")); // 探针已消耗槽位 3
-    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-an2"),
-                                         QStringLiteral("ENGINE_ERROR"),
+    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-an2"), QStringLiteral("ENGINE_ERROR"),
                                          QStringLiteral("标注渲染失败")));
     QCOMPARE(errors.count(), 1);
     QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("ENGINE_ERROR"));
