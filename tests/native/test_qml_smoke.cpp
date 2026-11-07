@@ -6,13 +6,13 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
-#include <QUrl>
 #include <QTest>
+#include <QUrl>
 
 class QmlSmokeTest : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     // 主壳加载即门禁：任何类型解析失败都会让 rootObjects 为空，
     // QML 错误明细由默认消息处理器打到 stderr（ctest 失败输出可见）。
     void mainShellLoads() {

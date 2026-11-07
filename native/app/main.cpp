@@ -6,15 +6,15 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
-#include <QUrl>
 #include <QTimer>
+#include <QUrl>
 #include <QtCore/qlogging.h>
 
 int main(int argc, char *argv[]) {
     // --qml-smoke：打包产物自检模式（v2.0.0-alpha.1 实机反馈催生）。
     // 强制 offscreen 真加载主壳 QML，创建成功即退出 0，失败退出 1。
     // release.yml 在三平台打包后各跑一次，把 "CI 构建绿但运行时 QML 坏"
-    //（如插件缺失、QML 模块没随包）拦在发布之前。
+    // （如插件缺失、QML 模块没随包）拦在发布之前。
     const bool smoke = argc > 1 && qstrcmp(argv[1], "--qml-smoke") == 0;
     // 仅在未显式指定平台时才默认 offscreen（macOS runner 有 WindowServer，
     // 强制 offscreen 反而可能因 offscreen 插件未随 macdeployqt 部署而失败）。
