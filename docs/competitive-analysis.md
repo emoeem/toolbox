@@ -24,6 +24,25 @@
 - 行动项：Arch/CachyOS 验收时记录实际 Qt 版本；`qt_add_qml_module` 的
   QML 热重载用于开发流程（Phase 8 评估）。
 
+### 2.1 落地记录（2026-11-07，v2.0.0-alpha.1 定版时）
+
+Qt 6.12 评估结论（本节为 §2 行动项的落地记录，不改变任何代码/构建配置）：
+
+1. **CMake 下限保持 6.4**（CI runner 兼容）：CI native job 使用 Ubuntu 发行版
+   Qt 6 开发包（`qt6-base-dev` / `qt6-declarative-dev`），与该下限匹配；
+   工程全部 API 用量在 6.4 内。实证：`CMakeLists.txt`
+   `find_package(Qt6 6.4 REQUIRED COMPONENTS ...)` 与
+   `qt_standard_project_setup(REQUIRES 6.4)`。
+2. **产品目标 Qt 6.12 LTS 列入发布说明**：CHANGELOG.md v2.0.0-alpha.1 条目
+   "版本与平台口径"节明确——构建下限 6.4，产品目标 Qt 6.12 LTS
+   （2026-09-30 发布，开源支持至约 2027-04），实机验收时记录实际锁定版本。
+3. **Canvas2D 评估记为后续项**：Qt Canvas Painter（GPU-only）作为
+   ImageCanvas 辅助线/选区层的候选渲染路径，继续保留在 §4 行动项 3
+   （Phase 8 评估），本版不实施。
+
+剩余开放项不变：Arch/CachyOS 实机验收时记录实际 Qt 版本；
+`qt_add_qml_module` QML 热重载的开发流程收益随 Phase 8 评估。
+
 ## 3. 对比表
 
 | 维度 | 本项目（Toolbox 2.0） | Photoflare / Studio | darktable / Lightroom 思路 | 差距与借鉴 |
@@ -59,6 +78,8 @@
    预览流量合并靠防抖，历史条目合并靠本机制，两者互补。
 3. **【Phase 8 评估】Qt 6.12 目标**：Arch 包升级后把 CMake 产品目标提到 6.12，
    评估 Canvas2D 替代 ImageCanvas 的辅助线/选区层。
+   （2026-11-07 评估结论已记录于 §2.1 落地记录：构建下限维持 6.4，产品目标
+   6.12 已列入 v2.0.0-alpha.1 发布说明；Canvas2D 仍为后续评估项。）
 4. **【观察项】插件 SDK 形态**：Photoflare 的 Qt6 共享库插件接口与本项目
    backends/ 抽象同源；若未来出现第三方扩展需求，参考其 SDK 头文件组织。
    当前不引入（维护成本 > 收益）。

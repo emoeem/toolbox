@@ -46,7 +46,9 @@ class Application : public QObject {
     FontService *fontService() const { return m_fontService; }
     QUrl currentPage() const { return m_currentPage; }
     void setCurrentPage(const QUrl &page);
-    QString version() const { return QStringLiteral("0.2.0"); }
+    // 与 pyproject.toml version（单一来源）对齐，见 CHANGELOG.md
+    // v2.0.0-alpha.1 条目。
+    QString version() const { return QStringLiteral("2.0.0-alpha.1"); }
     QString qtVersion() const;
 
     Q_INVOKABLE void navigate(const QString &pageId);

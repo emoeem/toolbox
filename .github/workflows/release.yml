@@ -1,0 +1,446 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Linux bundle: portable tar.gz (bundled Qt libs + QML modules + real CPython
+  # from python-build-standalone + worker sources) AND a self-contained
+  # AppImage.
+  build-linux:
+    name: Build (linux tar.gz + AppImage)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      VERSION_NO_V: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.4.3"
+          cache: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build native shell
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j
+
+      - name: Assemble portable tar.gz
+        run: |
+          set -e
+          VER="${VERSION_NO_V#v}"
+          PKG="pkg/toolbox-${VER}-linux-x64"
+          mkdir -p "$PKG"
+          cp build/toolbox "$PKG/toolbox"
+          chmod +x "$PKG/toolbox"
+          mkdir -p "$PKG/qt/lib" "$PKG/qt/plugins" "$PKG/qt/qml"
+          cp -a "$QT_ROOT_DIR/lib/libQt6"*.so* "$PKG/qt/lib/" || true
+          cp -a "$QT_ROOT_DIR/lib/libicu"*.so* "$PKG/qt/lib/" || true
+          cp -a "$QT_ROOT_DIR/plugins/." "$PKG/qt/plugins/"
+          # Qt 自身的 QML 运行时模块在 $QT_ROOT_DIR/qml/（不在 plugins/）。
+          # 应用自己的 QML 全部编进 qrc，磁盘上没有 .qml，但 QtQuick/Controls
+          # 等模块必须随包携带并在 toolbox.sh 里暴露导入路径，否则用户机首启
+          # 报 "module QtQuick is not installed"。
+          cp -a "$QT_ROOT_DIR/qml/." "$PKG/qt/qml/"
+          # 捆绑真实 CPython 解释器：uv venv --relocatable 不携带基础解释器
+          # （PEP 405：bin/python3 是指向基础解释器的符号链接），CI 上该基础
+          # 解释器在用户机不存在，backend/python 是死路径。python-build-
+          # standalone 的 install_only 包即解即用、可任意重定位，解包出
+          # python/ 树后直接作为包内运行时；依赖装进该解释器自己的
+          # site-packages（uv pip --python 对非 venv 解释器同样生效）。
+          curl -sL -o cpython.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.11.18+20261026-x86_64-unknown-linux-gnu-install_only.tar.gz"
+          tar -xzf cpython.tar.gz
+          mv python "$PKG/python"
+          uv pip install --python "$PKG/python/bin/python3" -r requirements.txt
+          mkdir -p "$PKG/worker"
+          cp -a python_worker processors backends "$PKG/worker/"
+          cp pyproject.toml "$PKG/worker/"
+          cat > "$PKG/toolbox.sh" <<'EOS'
+          #!/usr/bin/env bash
+          set -e
+          DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          CONF="$HOME/.config/Emo/Toolbox2.conf"
+          if [ ! -f "$CONF" ]; then
+            mkdir -p "$(dirname "$CONF")"
+            # QSettings::IniFormat 键路径 a/b 对应 INI section [a]、键 b
+            # （应用读 backend/python、backend/repoRoot，见
+            # settings_service.cpp / application.cpp），预置必须写 [backend]
+            # 段；写 [General] 段应用读不到，首启即 WORKER_START_FAILED。
+            printf '[backend]\npython=%s/python/bin/python3\nrepoRoot=%s/worker\n' "$DIR" "$DIR" > "$CONF"
+          fi
+          export LD_LIBRARY_PATH="$DIR/qt/lib:${LD_LIBRARY_PATH:-}"
+          export QT_PLUGIN_PATH="$DIR/qt/plugins"
+          # Qt 自身 QML 模块导入路径（QQmlTypeLoader 两个变量都读）。
+          export QML2_IMPORT_PATH="$DIR/qt/qml"
+          export QML_IMPORT_PATH="$DIR/qt/qml"
+          export PATH="$DIR/python/bin:$PATH"
+          exec "$DIR/toolbox"
+          EOS
+          chmod +x "$PKG/toolbox.sh"
+          tar -czf "toolbox-${VER}-linux-x64.tar.gz" -C pkg .
+
+      - name: Build AppImage
+        run: |
+          set -e
+          VER="${VERSION_NO_V#v}"
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          # linuxdeploy + plugin-qt is the supported Qt 6 AppImage path
+          # (linuxdeployqt is Qt5-oriented).
+          curl -sL -o linuxdeploy.AppImage "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          curl -sL -o linuxdeploy-plugin-qt.AppImage "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+          APPDIR=AppDir
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
+                   "$APPDIR/usr/share/icons/hicolor/256x256/apps" \
+                   "$APPDIR/usr/share/toolbox"
+          cp build/toolbox "$APPDIR/usr/bin/toolbox"
+          # 应用 .qml 源放入 AppDir：linuxdeploy-plugin-qt 用 qmlimportscanner
+          # 扫描 AppDir 里的磁盘 .qml 决定捆绑哪些 Qt QML 模块；qrc 内嵌 QML
+          # 扫描器看不到，磁盘上没有源文件就等于零捆绑。
+          cp -a ui "$APPDIR/usr/share/toolbox/ui"
+          cat > "$APPDIR/usr/share/applications/toolbox.desktop" <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Toolbox
+          Exec=toolbox-start
+          Icon=toolbox
+          Categories=Graphics;Utility;
+          EOF
+          # Bundled, relocatable real CPython (python-build-standalone) +
+          # worker sources inside the AppImage（与 tar.gz 同理，venv 不携带
+          # 基础解释器，不能用作打包运行时）。
+          curl -sL -o cpython.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.11.18+20261026-x86_64-unknown-linux-gnu-install_only.tar.gz"
+          tar -xzf cpython.tar.gz
+          mv python "$APPDIR/usr/share/toolbox/python"
+          uv pip install --python "$APPDIR/usr/share/toolbox/python/bin/python3" -r requirements.txt
+          mkdir -p "$APPDIR/usr/share/toolbox/worker"
+          cp -a python_worker processors backends "$APPDIR/usr/share/toolbox/worker/"
+          cp pyproject.toml "$APPDIR/usr/share/toolbox/worker/"
+          # Qt 自身 QML 模块整目录随包（确定性兜底，不依赖 plugin-qt 的扫描
+          # 结果），并由 toolbox-start 暴露导入路径。
+          mkdir -p "$APPDIR/usr/qml"
+          cp -a "$QT_ROOT_DIR/qml/." "$APPDIR/usr/qml/"
+          cat > "$APPDIR/usr/bin/toolbox-start" <<'EOS'
+          #!/usr/bin/env bash
+          set -e
+          SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+          USR="$(readlink -f "$(dirname "$SELF")/..")"
+          ROOT="$(readlink -f "$(dirname "$SELF")/../share/toolbox")"
+          CONF="$HOME/.config/Emo/Toolbox2.conf"
+          if [ ! -f "$CONF" ]; then
+            mkdir -p "$(dirname "$CONF")"
+            # INI 段必须为 [backend]（QSettings 键路径语义，见 toolbox.sh）。
+            printf '[backend]\npython=%s/python/bin/python3\nrepoRoot=%s/worker\n' "$ROOT" "$ROOT" > "$CONF"
+          fi
+          export LD_LIBRARY_PATH="$USR/lib:${LD_LIBRARY_PATH:-}"
+          export QT_PLUGIN_PATH="$USR/plugins:${QT_PLUGIN_PATH:-}"
+          export QML2_IMPORT_PATH="$USR/qml:${QML2_IMPORT_PATH:-}"
+          export QML_IMPORT_PATH="$USR/qml:${QML_IMPORT_PATH:-}"
+          export PATH="$ROOT/python/bin:$PATH"
+          exec "$(dirname "$SELF")/toolbox" "$@"
+          EOS
+          chmod +x "$APPDIR/usr/bin/toolbox-start"
+          # Icon generated with the bundled pillow.
+          "$APPDIR/usr/share/toolbox/python/bin/python3" -c "from PIL import Image; Image.new('RGB',(256,256),(30,30,46)).save('AppDir/usr/share/icons/hicolor/256x256/apps/toolbox.png')"
+          # -e targets the real ELF binary for Qt lib bundling; desktop Exec
+          # points at the launcher so users get the preseeded backend config.
+          # 不使用 -v2：-v/--verbosity 虽在 linuxdeploy 注册（ValueFlag<int>），
+          # 但紧凑短选项写法的解析行为未经实证，删除以消除风险。输出名经
+          # LDAI_OUTPUT（plugin-appimage 透传给 appimagetool 的目标路径）固定
+          # 为确定性文件名，不依赖 desktop 文件派生的 glob。
+          LINUXDEPLOY_OUTPUT_VERSION="$VER" LDAI_OUTPUT="toolbox-${VER}-linux-x64.AppImage" ./linuxdeploy.AppImage \
+            --appdir "$APPDIR" \
+            -e "$APPDIR/usr/bin/toolbox" \
+            -d "$APPDIR/usr/share/applications/toolbox.desktop" \
+            -i "$APPDIR/usr/share/icons/hicolor/256x256/apps/toolbox.png" \
+            --plugin qt --output appimage
+          test -f "toolbox-${VER}-linux-x64.AppImage" || { echo "AppImage output missing:"; ls -la ./*.AppImage 2>/dev/null || true; exit 1; }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x64
+          path: |
+            toolbox-*.tar.gz
+            toolbox-*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+  # Arch Linux: native pacman package built inside the archlinux container.
+  build-arch:
+    name: Build (archlinux pacman)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 60
+    env:
+      VERSION_NO_V: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: |
+          pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative uv curl
+
+      - name: makepkg
+        shell: bash
+        run: |
+          set -e
+          VER="${VERSION_NO_V#v}"; VER="${VER//-/.}"
+          useradd -m builder
+          cp -a "$GITHUB_WORKSPACE" /home/builder/src
+          chown -R builder:builder /home/builder/src
+          cd /home/builder/src
+          cat > PKGBUILD <<EOF
+          pkgname=toolbox2
+          pkgver=${VER}
+          pkgrel=1
+          pkgdesc='Toolbox 2.0 — image toolbox (C++/QML shell + Python worker)'
+          arch=('x86_64')
+          url='https://github.com/emoeem/toolbox'
+          license=('Apache-2.0')
+          depends=('qt6-base' 'qt6-declarative')
+          makedepends=('cmake' 'ninja' 'uv')
+          options=(!strip)
+          build() {
+            cd "\$startdir"
+            cmake -B build -DCMAKE_BUILD_TYPE=Release
+            cmake --build build -j"\$(nproc)"
+            # 捆绑真实 CPython（python-build-standalone install_only，解包即
+            # python/ 树）；uv venv 不携带基础解释器，不能用。
+            curl -sL -o cpython.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.11.18+20261026-x86_64-unknown-linux-gnu-install_only.tar.gz"
+            tar -xzf cpython.tar.gz
+            mv python cpython-runtime
+            uv pip install --python cpython-runtime/bin/python3 -r requirements.txt
+          }
+          package() {
+            cd "\$startdir"
+            local dst="\$pkgdir/opt/toolbox2"
+            install -Dm755 build/toolbox "\$dst/bin/toolbox"
+            mkdir -p "\$dst/worker"
+            cp -a python_worker processors backends "\$dst/worker/"
+            cp pyproject.toml "\$dst/worker/"
+            cp -a cpython-runtime "\$dst/python"
+            install -d "\$pkgdir/usr/bin"
+            cat > "\$pkgdir/usr/bin/toolbox2" <<'EOS'
+          #!/usr/bin/env bash
+          set -e
+          CONF="\$HOME/.config/Emo/Toolbox2.conf"
+          if [ ! -f "\$CONF" ]; then
+            mkdir -p "\$(dirname "\$CONF")"
+            printf '[backend]\npython=/opt/toolbox2/python/bin/python3\nrepoRoot=/opt/toolbox2/worker\n' > "\$CONF"
+          fi
+          export PATH="/opt/toolbox2/python/bin:\$PATH"
+          exec /opt/toolbox2/bin/toolbox "\$@"
+          EOS
+            chmod 755 "\$pkgdir/usr/bin/toolbox2"
+          }
+          EOF
+          chown builder:builder PKGBUILD
+          su builder -c "cd /home/builder/src && makepkg -f --noconfirm"
+          cp *.pkg.tar.zst "$GITHUB_WORKSPACE/"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-archlinux-x64
+          path: "*.pkg.tar.zst"
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build (windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      VERSION_NO_V: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.4.3"
+          cache: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build native shell
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j
+
+      - name: Assemble package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = $env:VERSION_NO_V -replace '^v',''
+          $pkg = "pkg/toolbox-$ver-windows-x64"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          Copy-Item build/Release/toolbox.exe $pkg/
+          # --qmldir ui：qmlimportscanner 扫描 ui/ 磁盘 .qml 命中全部 import，
+          # 才会把 QtQuick/Controls 的 QML 插件 DLL 部署进包（exe 目录里的
+          # qrc 内嵌 QML 扫描器看不到）。
+          windeployqt --release --no-translations --qmldir ui "$pkg/toolbox.exe"
+          # 捆绑真实 CPython（python-build-standalone install_only，解包即
+          # python/ 树，python.exe 位于 python/ 根）；uv venv 的 trampoline
+          # 依赖 pyvenv.cfg 里的绝对 home 路径，用户机上必然断裂。
+          curl.exe -sL -o cpython.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.11.18+20261026-x86_64-pc-windows-msvc-install_only.tar.gz"
+          tar -xzf cpython.tar.gz
+          Move-Item python "$pkg/python"
+          uv pip install --python "$pkg/python/python.exe" -r requirements.txt
+          New-Item -ItemType Directory -Force -Path "$pkg/worker" | Out-Null
+          Copy-Item -Recurse python_worker, processors, backends "$pkg/worker/"
+          Copy-Item pyproject.toml "$pkg/worker/"
+          # Bat 内注释只用 ASCII：Out-File -Encoding ascii 会把非 ASCII 压成
+          # '?'，且用户机 cmd 以本地代码页解析 .bat，UTF-8 中文注释会乱码。
+          # INI 预置值统一用正斜杠（QSettings IniFormat 把反斜杠当转义字符）；
+          # 应用按 backend/python、backend/repoRoot 键路径读取，对应 INI
+          # section [backend]、键 python/repoRoot（不能写 [General] 段）。
+          @'
+          @echo off
+          set "HERE=%~dp0"
+          rem INI preseed uses forward slashes (QSettings IniFormat escapes backslashes);
+          rem app reads keys backend/python and backend/repoRoot -> INI section [backend].
+          set "HERE=%HERE:\=/%"
+          set "CONF=%APPDATA%\Emo\Toolbox2.conf"
+          if not exist "%CONF%" (
+            mkdir "%APPDATA%\Emo" 2>nul
+            > "%CONF%" echo [backend]
+            >> "%CONF%" echo python=%HERE%python/python.exe
+            >> "%CONF%" echo repoRoot=%HERE%worker
+          )
+          set "PATH=%~dp0python;%PATH%"
+          start "" "%~dp0toolbox.exe"
+          '@ | Out-File -Encoding ascii "$pkg/toolbox.bat"
+          Compress-Archive -Path "pkg/toolbox-$ver-windows-x64" -DestinationPath "toolbox-$ver-windows-x64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: toolbox-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      VERSION_NO_V: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.4.3"
+          cache: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build native shell
+        run: |
+          # macos-latest 装有完整 Xcode，CMake 默认生成器为 Xcode（多配置），
+          # 产物会落在 build/Release/ 而非 build/。显式单配置 Unix Makefiles，
+          # 保持 build/toolbox.app 单一路径。
+          # Qt 6.4.3 的 qt_add_executable 只把 MACOSX_BUNDLE 透传给
+          # add_executable（自动生成 .app 是 Qt 6.7+ QTP0008 的行为），必须
+          # 以 CMAKE_MACOSX_BUNDLE 显式开 bundle，否则没有 .app 可给
+          # macdeployqt。BUILD_TESTING=OFF：发布构建不跑测试（ci.yml 负责），
+          # 避免测试目标也被 bundle 化。
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -DCMAKE_MACOSX_BUNDLE=ON -DBUILD_TESTING=OFF
+          cmake --build build --config Release -j
+
+      - name: Assemble package
+        run: |
+          set -e
+          VER="${VERSION_NO_V#v}"
+          PKG="pkg/toolbox-${VER}-macos-arm64"
+          mkdir -p "$PKG"
+          # -qmldir=ui：扫描 ui/ 的 .qml import 并把 QML 模块部署进 bundle，
+          # 否则干净机器上 QQmlApplicationEngine 报 module not installed。
+          macdeployqt build/toolbox.app -verbose=1 -qmldir=ui
+          cp -a build/toolbox.app "$PKG/Toolbox.app"
+          # 捆绑真实 CPython（python-build-standalone install_only，解包即
+          # python/ 树）；uv venv 不携带基础解释器，不能用。
+          curl -sL -o cpython.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.11.18+20261026-aarch64-apple-darwin-install_only.tar.gz"
+          tar -xzf cpython.tar.gz
+          mv python "$PKG/python"
+          uv pip install --python "$PKG/python/bin/python3" -r requirements.txt
+          mkdir -p "$PKG/worker"
+          cp -a python_worker processors backends "$PKG/worker/"
+          cp pyproject.toml "$PKG/worker/"
+          cat > "$PKG/start.command" <<'EOS'
+          #!/usr/bin/env bash
+          set -e
+          DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          CONF="$HOME/Library/Preferences/Emo/Toolbox2.conf"
+          if [ ! -f "$CONF" ]; then
+            mkdir -p "$(dirname "$CONF")"
+            # INI 段必须为 [backend]（QSettings 键路径语义，见 toolbox.sh）。
+            printf '[backend]\npython=%s/python/bin/python3\nrepoRoot=%s/worker\n' "$DIR" "$DIR" > "$CONF"
+          fi
+          export PATH="$DIR/python/bin:$PATH"
+          open "$DIR/Toolbox.app"
+          EOS
+          chmod +x "$PKG/start.command"
+          cd pkg && zip -qry "../toolbox-${VER}-macos-arm64.zip" "toolbox-${VER}-macos-arm64" && cd ..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-arm64
+          path: toolbox-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [build-linux, build-arch, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      # 发布套件部署时应把 content/release-kit/release-body.md 复制为
+      # docs/release-notes-v2.0.0-alpha.1.md（与 release.yml →
+      # .github/workflows/release.yml 同批）。body_path 指向不存在文件会让
+      # release job 在四个构建 job 全部成功后才报 ENOENT，所以这里先解析
+      # 正文并回退：部署的正式说明 → CHANGELOG.md 的 2.0.0-alpha.1 小节 →
+      # 占位说明。
+      - name: Resolve release notes body
+        run: |
+          set -e
+          if [ -f docs/release-notes-v2.0.0-alpha.1.md ]; then
+            cp docs/release-notes-v2.0.0-alpha.1.md release-notes-body.md
+          elif grep -q '^## 2\.0\.0-alpha\.1' CHANGELOG.md; then
+            awk '
+              /^## 2\.0\.0-alpha\.1/ { found = 1 }
+              found && /^## / && !/^## 2\.0\.0-alpha\.1/ { exit }
+              found { print }
+            ' CHANGELOG.md > release-notes-body.md
+          else
+            printf '# Toolbox 2.0.0-alpha.1\n\nPre-release build. Full notes: see CHANGELOG.md in the repository.\n' > release-notes-body.md
+          fi
+          test -s release-notes-body.md
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          body_path: release-notes-body.md
+          files: artifacts/*

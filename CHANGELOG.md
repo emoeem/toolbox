@@ -1,5 +1,50 @@
 # Changelog
 
+## 2.0.0-alpha.1（2026-11-07 发布）
+
+Toolbox 2.0 首个发布版本（预发布 alpha）。定版依据总纲 `docs/toolbox-2.0-project-plan.md`：§13 Phase 0-7 的代码与文档工作已全部交付，Phase 8（打包、发布与最终质量验收）未开始，且 §14.2 要求未经目标环境验收不得标记 runtime_verified / accepted——因此首个发布版本号定为 **2.0.0-alpha.1**（预发布），正式版待 Phase 8 打包与 Linux 实机验收后另定。版本号单一来源为 `pyproject.toml`；app 内版本常量（`native/app/application.h` `Application::version()`、`native/app/main.cpp` `setApplicationVersion`）已同步对齐为同一值；`CMakeLists.txt` 的 project VERSION 语法只接受纯数字分量（无法表达预发布段），不作版本来源，与发布版本的对齐留给构建打包阶段。
+
+### 本版本包含（Phase 0-7 特性汇总）
+
+- **Phase 0 — 字体系统与迁移基线**（2026-11-05 条目）：修复 1.0 字体强制覆盖体系（删除 QSS 全局字体强制与启动时全目录 MiSans 扫描，`app/theme.py` / `app/fonts.py`），默认系统字体 + 中文/等宽角色回退，等宽设置真正生效到 Shader Studio 编辑器，字体可诊断（`glyph_coverage` / `fallback_candidates` / `diagnose`）；确定性测试样本 `tools/make_test_samples.py` 与引擎基线测试 `tests/test_engine_baseline.py`（42 个 core 算子 + IO 往返 SHA-256，平台标签含 numba 状态）；架构分析与 45 工具 + 2 Studio 迁移矩阵。
+- **Phase 1 — 产品信息架构与 UI/UX 设计**（2026-11-06 条目，全部为文档）：设计令牌定稿（Catppuccin Mocha 深色 + 中性浅色、Mauve 强调）、信息架构与导航树、三条 P0 用户流程、页面规格（ui-page-spec）与组件库 API 规格（ui-component-spec）。
+- **Phase 2-3 — C++/Qt Quick 原型与 Python Worker/IPC**（2026-11-06 条目）：CMake 构建体系（Qt ≥6.4 下限 / C++20 / linux-debug|release|ci presets）与 clang-format/clang-tidy；`native/` Application 单例（导航/页面路由）、ToolModel + NavModel、ImageCanvas（QQuickItem + QSGSimpleTextureNode：指针锚定缩放/平移/双击适配/100%/透明棋盘格）；`python_worker/` JSON Lines 协议（`protocol=1`）、任务状态机（queued→running→completed/failed/cancelling→cancelled + 100ms 进度节流 + CancelToken）、DocumentStore/FilterDefRegistry 适配层；`native/backend/` QProcess 行分帧、握手超时 5s、崩溃检测与 ≤3 次自动重启；协议规范 `docs/ipc-protocol.md`。
+- **Phase 4 — UI 基础设施与应用壳**（2026-11-06 条目）：SettingsService（QSettings Emo/Toolbox2：主题三态、布局持久化、字体、backend/* 配置、最近文件上限 10）、FontService（角色解析 + 五类覆盖诊断）、TaskModel（任务行/行内取消/终态保留 64 条 FIFO）、28 个 `App*` 前缀 QML 组件（基础/布局/业务三层，仅引用 Theme 令牌）、设置页四分区真实读写、任务抽屉与状态栏。本阶段曾达 CI 双 job 全绿（test：307 Python 测试 + ruff；native：构建零错误 + CTest 5/5）。
+- **Phase 5 — 核心图像编辑工作流**（2026-11-06 条目）：EditorPage 真实编辑工作区（打开/保存/另存为/拖放、九滑杆调整检查器、300ms 防抖预览 + dragFinished 立即预览、旋转 90°/翻转、撤销/重做/重置受全分辨率在途门控 + `documentActionFailed` 双重上下文解锁、状态栏 宽×高·版本·未保存标记）；协议新增 `image.adjust` / `image.transform` / `image.undo` / `image.redo` / `image.reset` / `image.history` 与错误码 `UNREDOABLE`；像素快照历史（30 条 + 512MB 预算、redo 分支截断、深度淘汰）；DocumentService version/modified 状态机与 HistoryModel。
+- **Phase 6A — 滤镜系统**（2026-11-07 条目）：FilterDef 驱动的滤镜目录（搜索/置灰 + 依赖原因 Tooltip）、滤镜链编辑（上移/下移/启停）、预设四动作（`filter.presets.list/save/load/delete`）、参数定义 JSON → 控件自动生成（AppFilterParameterGroup），编辑器新增"滤镜"页签，`filter.preview`/`filter.apply` 整链一次提交。G'MIC 仅交付置灰机制，滤镜库本体未迁移。
+- **Phase 6B — 批处理**（2026-11-07 条目）：`batch.start` / `batch.cancel` + `gmic.check`；批处理向导（文件/目录导入、纯转换或滤镜链预设、输出格式/质量/命名三态、逐文件进度帧 + items 全量对账、取消与单文件失败不中断）；BatchModel/BatchService。
+- **Phase 6C — 统一 Studio 工作区**（2026-11-07 条目）：`generate.list` / `generate.render`——分形（`processors/fractal.py` 全公式表）、纹理（texture_studio 生成器，gmic 系 CLI/numpy 双路径）、渐变（linear/radial/mesh）；AppStudioPage（生成器目录 + 512/1024/2048 预览 + 参数检查器 + 导出到编辑器）；Worker 不自造参数表（元数据全部取自 processors 既有资产）。
+- **Phase 6+ 改进 — 参数化 undo 与滑杆命令合并**（2026-11-07 条目，依据 docs/competitive-analysis.md §4 行动项 1/2）：`filter.apply` 历史条目只存链 steps 参数，undo/redo 从基线/最近快照锚点重放（像素快照仅保留给 transform/crop 类"重放屏障"），历史内存从 O(像素×历史) 降至 O(参数)；连续全分辨率 `image.adjust` 与上一条同 key 命令合并（coalescing，redo 栈非空不合并）。协议形状不变，纯 Worker 内部历史策略修订。
+- **Phase 7 — AI 与辅助工具**（2026-11-07 条目）：`assist.list` 工具目录 + 32 个工具动作（OCR / PDF×8 / 条形码×3 / ASCII / 图像对比 / 校验和 / 直方图 / LUT / 媒体×2 / EXIF×2 / 水印 / 归档 / 加密×2 / Base64×2 / AI×5）+ 错误码 `DEPENDENCY_MISSING`；目录 `available`/`optional_deps` 与提交判定同源探测、不做缓存；统一工具页工作流（目录浏览 → 参数 JSON → 运行 → 结果呈现/导出编辑器）。依赖诚实边界：pystrich 缺失时 EAN-13 拒绝（1.0 伪条码不暴露）、DataMatrix 不注册（1.0 实现实为 QR 伪实现）、AI 重模型无模型文件默认 available=false（目录置灰 + 提交拒绝双保险）。
+
+### CI 验证范围（.github/workflows/ci.yml）
+
+- test job（ubuntu-latest / Python 3.11）：`ruff check .` + `unittest discover` 全量 35 个 Python 测试模块（纯 Python 路径，`TOOLBOX_NO_NUMBA=1`、offscreen）+ numba JIT 子集（test_fractal / test_filter_robustness / test_core）；glslang-tools 安装；**G'MIC 有意不安装**（依赖其的测试在二进制缺失时跳过）。
+- native job（ubuntu-latest）：发行版 Qt 6 开发包（与 CMake 下限 6.4 匹配）CMake preset 构建 + clang-format 自动格式化机器人与格式门禁 + clang-tidy（咨询性，2 文件）+ **CTest 15 个测试目标**（模型契约 / IPC 编解码 / 服务生命周期，offscreen）。
+- CI 不覆盖（必须实机）：QProcess + JSON Lines 真实跨进程链路、QML/GUI 交互、Wayland/OpenGL 图形会话、真实 G'MIC CLI 渲染、打包安装。
+- 状态如实：以上是 CI 机制的**结构性覆盖**（discover/CTest 自动纳入各批新增测试）；各批次推送后的实际运行结果以 GitHub Actions 为准。撰写本条目的环境为 Windows 编码 VM（无 gh、无解释器），无法核对最新 run 状态；按总纲 §15 角色纪律，本机未执行任何测试/构建。
+
+### 实机待验收（Linux 目标环境，Wayland 第一验证目标，均未执行）
+
+- 引擎基线文件 `tests/baselines/engine_baseline.json` **尚未生成**（需指定 Linux 环境首次运行 `tests/test_engine_baseline.py` 生成并审查——Phase 0 遗留事项；本版本发布时该文件不存在）。
+- 逐阶段清单：`docs/phase0-acceptance.md`（字体行为/基线生成）→ `phase2-acceptance.md` / `phase3-acceptance.md`（构建启动/垂直切片端到端）→ `phase4-acceptance.md`（主题/字体/布局持久化/任务面板）→ `phase5-acceptance.md`（编辑端到端/undo 像素回归/Worker 崩溃提示/大图） → `phase6a-acceptance.md`（流程 2 端到端/G'MIC 置灰/预览竞态）→ `phase6b-acceptance.md`（批处理端到端/大目录）→ `phase6c-acceptance.md`（Studio 工作流/真实 gmic 观感）→ `phase7-acceptance.md`（工具目录/依赖置灰路径/AI 降级说明）。
+
+### 已知限制（择要，完整清单见各批次条目）
+
+- 打包：发布流水线（.github/workflows/release.yml，随本版本引入）提供 Linux tar.gz/AppImage、Arch pacman 包与 Windows/macOS 压缩包（捆绑 Python 运行时 + Worker，启动脚本首启自动预置后端配置）；产物经 CI 构建，未做实机安装验收。
+- Studio [另存为] 未实现（`StudioService.savePreviewAs` 缺位）；Fractal/Texture/Shader 三个分页面未分流（"创作"入口统一 StudioPage）；`shader:preview` 恒不可用（Worker 无 OpenGL 运行时）。
+- 预览缓存未接入 Worker 管线（`fingerprint` 已回传但无命中逻辑）；同文档旧预览覆盖竞态待实机验收。
+- crop/scale 协议已支持但编辑器无 UI 入口；Esc 取消在途预览未实现；批处理不在任务抽屉、无[打开输出目录]/[失败重试]。
+- Worker 崩溃后 DocumentService 不反向清空 currentDocumentId（依赖下一次操作 `UNKNOWN_DOCUMENT` 兜底）。
+- G'MIC 滤镜库本体未迁移；EXIF 按 Tag 编辑、图片→PDF、压缩实验室、重复/相似查找、AI 深度图等 1.0 辅助能力未注册为协议动作。
+
+### 版本与平台口径
+
+- 版本：**2.0.0-alpha.1**（单一来源 `pyproject.toml`；app 内常量已对齐）。
+- Qt：构建下限 6.4（CI runner 兼容，`CMakeLists.txt` `find_package(Qt6 6.4 REQUIRED)`）；产品目标 **Qt 6.12 LTS**（2026-09-30 发布，开源支持至约 2027-04），实机验收时记录实际锁定版本——评估结论见 `docs/competitive-analysis.md` §2.1 落地记录。
+- 平台：Linux 桌面（Wayland 第一验证目标，X11 次要兼容）；Windows/macOS 不在第一阶段交付承诺内（总纲 §3.1/§3.4），本版本应维护者要求额外提供其 CI 构建产物（实机验收待后续）。
+- Git：本条目所属变更（版本定版 + README/对比文档更新）在分支 phase7-assist 工作树上撰写、尚未提交；提交由维护者/提交员按仓库流程执行。
+
 ## 2026-11-07 (Phase 7 — AI 与辅助工具：统一工具页与 assist 动作族)
 
 依据总纲 `docs/toolbox-2.0-project-plan.md` §13 Phase 7（AI 与辅助工具），
