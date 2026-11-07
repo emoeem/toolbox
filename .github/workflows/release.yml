@@ -32,8 +32,14 @@ jobs:
 
       - name: Build native shell
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release -j
+          # -DBUILD_TESTING=OFF：发布构建不编译 tests/native 测试目标
+          # （测试由 ci.yml 负责），少一批 TU。
+          # -j 显式给数字：裸 -j 在 make 里是"不限并发"，上百个 TU 同时起
+          # cc1plus 直接耗尽 runner 内存（Run 1：编译 98% 处全部进程被
+          # Terminated，job 被标记 canceled——OOM killer 清场特征）。
+          # ubuntu-22.04 标准 runner 4 核 16GB，-j4 峰值内存受控。
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --config Release -j4
 
       - name: Assemble portable tar.gz
         run: |
@@ -269,7 +275,13 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.4.3"
+          # 6.4.3 的 QtCore 头（qvarlengtharray.h）在 MSVC 下使用已被 STL
+          # 移除的 stdext::checked_array_iterator，VS 2026（windows-2025-vs2026
+          # 镜像，Run 1 实证 C3861 'stdext': identifier not found）编译必挂；
+          # Qt 6.5 起头文件不再使用 stdext。6.10 官方预编译包为
+          # msvc2022_64，MSVC 自 2015 起 ABI 向后兼容，v145 工具链可消费。
+          version: "6.10.3"
+          arch: win64_msvc2022_64
           cache: false
 
       - name: Install uv
@@ -345,7 +357,12 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.4.3"
+          # 6.4.3 的 FindWrapOpenGL 会给可执行文件链接 -framework AGL，
+          # 而 AGL 已从 macOS 26 SDK（macos-26-arm64 镜像，Run 1 实证
+          # "ld: framework 'AGL' not found"）移除；qtbase 自 2025-06 起
+          # 移除 AGL 依赖，首个可用版本为 6.8.7+，取 6.10 LTS 系列最新补丁。
+          version: "6.10.3"
+          arch: clang_64
           cache: false
 
       - name: Install uv
@@ -362,7 +379,9 @@ jobs:
           # macdeployqt。BUILD_TESTING=OFF：发布构建不跑测试（ci.yml 负责），
           # 避免测试目标也被 bundle 化。
           cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -DCMAKE_MACOSX_BUNDLE=ON -DBUILD_TESTING=OFF
-          cmake --build build --config Release -j
+          # -j 显式给数字：裸 -j 在 make 里是"不限并发"（Linux job 同配置被
+          # OOM 清场，见 build-linux 注释）；macOS runner 3 核，对齐 -j3。
+          cmake --build build --config Release -j3
 
       - name: Assemble package
         run: |
