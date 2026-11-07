@@ -98,7 +98,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev qt6-declarative-dev ninja-build clang-format clang-tidy
+            qt6-base-dev qt6-declarative-dev qt6-wayland ninja-build clang-format clang-tidy
+          # noble 把 QML 运行时模块拆成独立包：不装 qml6-module-*，qml_smoke
+          # 即报 "QtQuick.Controls plugin not found"（CI 实证）。
+          sudo apt-get install -y --no-install-recommends \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+            qml6-module-qtquick-window qml6-module-qtquick-dialogs \
+            qml6-module-qtquick-shapes qml6-module-qtqml-workerscript \
+            qml6-module-qt-labs-platform
 
       - name: Configure (CMake preset linux-ci)
         run: cmake --preset linux-ci

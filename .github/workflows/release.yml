@@ -34,6 +34,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qt6-base-dev qt6-declarative-dev qt6-wayland ninja-build
+          # noble 的 QML 运行时模块是独立包——不装则 $QT_ROOT_DIR/qml 里没有
+          # QtQuick/Controls，打包出去的 qml/ 目录残缺（alpha.2 打包前提）。
+          sudo apt-get install -y --no-install-recommends \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+            qml6-module-qtquick-window qml6-module-qtquick-dialogs \
+            qml6-module-qtquick-shapes qml6-module-qtqml-workerscript \
+            qml6-module-qt-labs-platform
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
