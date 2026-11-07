@@ -15,6 +15,12 @@ target_link_libraries(test_qml_smoke PRIVATE
     Qt6::QuickControls2
     Qt6::Test
 )
+# qt_add_qml_module 按“当前源目录”解析 QML_FILES 相对路径（CI 实证：ui/Main.qml
+# 被找成 tests/native/ui/Main.qml）——这里必须转绝对路径。
+set(QML_FILES_ABS)
+foreach(_qml ${QML_FILES})
+  list(APPEND QML_FILES_ABS "${CMAKE_SOURCE_DIR}/${_qml}")
+endforeach()
 qt_add_qml_module(test_qml_smoke
     URI Toolbox
     VERSION 1.0
@@ -60,7 +66,7 @@ qt_add_qml_module(test_qml_smoke
         ${CMAKE_SOURCE_DIR}/native/backend/python_worker.cpp
         ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.h
         ${CMAKE_SOURCE_DIR}/native/backend/backend_manager.cpp
-    QML_FILES ${QML_FILES}
+    QML_FILES ${QML_FILES_ABS}
 )
 # 根目录对 Theme.qml 的 QT_QML_SINGLETON_TYPE 是目录作用域，子目录不继承。
 set_source_files_properties(${CMAKE_SOURCE_DIR}/ui/themes/Theme.qml
