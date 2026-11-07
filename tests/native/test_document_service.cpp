@@ -198,6 +198,11 @@ class TestDocumentService : public QObject {
     void asyncResponseWithoutTaskIdReportsProtocolBreach();
     void staleTaskResultsDroppedAfterReopen();
 
+    // Phase 9：applyTransform / applyAnnotate
+    void applyTransformAndAnnotateLocalRejections();
+    void applyTransformDispatchAndCompletion();
+    void applyAnnotateDispatchAndFailure();
+
     // HistoryModel（合并进同文件，任务清单允许）
     void historyReadyForwardsIntoHistoryModel();
     void historyModelRendersCoalescedAdjustEntries();
@@ -745,6 +750,186 @@ void TestDocumentService::asyncResponseWithoutTaskIdReportsProtocolBreach() {
     QCOMPARE(actionFailed.at(0).at(0).toString(), QStringLiteral("doc-a1"));
     QCOMPARE(actionFailed.at(0).at(1).toString(), QStringLiteral("image.save"));
     QCOMPARE(saved.count(), 0);
+}
+
+// ---- Phase 9：applyTransform / applyAnnotate --------------------------------
+
+// 本地拒绝契约（applyFilters 空链同款）：无文档、空参数/空 ops 一律不上送
+// （探针证明未消耗槽位），每次调用恰好一次 documentError + 一次
+// documentActionFailed——后者是 QML 在途门控的唯一解除路径，多半个都会
+// 卡死或提前解锁门控。
+void TestDocumentService::applyTransformAndAnnotateLocalRejections() {
+    Harness h;
+    QSignalSpy errors(&h.service, &DocumentService::documentError);
+    QSignalSpy actionFailed(&h.service, &DocumentService::documentActionFailed);
+
+    QCOMPARE(h.backend.sendAction(QStringLiteral("probe.before")), reqId(1));
+    // 无文档：全分辨率与预览两种形态都本地拒绝（action 各自带/不带 -preview
+    // 后缀，QML 门控据此区分在途提交与预览提交的失败）。
+    h.service.applyTransform(QJsonObject{
+        {QStringLiteral("crop"),
+         QJsonObject{{QStringLiteral("x"), 10}, {QStringLiteral("y"), 10},
+                     {QStringLiteral("width"), 800}, {QStringLiteral("height"), 600}}}},
+        false, -1);
+    h.service.applyTransform(
+        QJsonObject{{QStringLiteral("rotate_free"),
+                     QJsonObject{{QStringLiteral("angle"), 15}, {QStringLiteral("expand"), true}}}},
+        true, 512);
+    h.service.applyAnnotate(QJsonArray{QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("pen")},
+        {QStringLiteral("points"), QJsonArray{QJsonArray{1, 2}, QJsonArray{3, 4}}},
+        {QStringLiteral("color"), QStringLiteral("#ff0000")},
+        {QStringLiteral("width"), 4}}});
+    // 空参数/空 ops：与无文档无关，同样本地拒绝（先于无文档判定，
+    // applyFilters 空链先例）。
+    h.service.applyTransform(QJsonObject{}, false, -1);
+    h.service.applyAnnotate(QJsonArray{});
+    // 五次调用全部本地拒绝，未消耗任何槽位。
+    QCOMPARE(h.backend.sendAction(QStringLiteral("probe.after")), reqId(2));
+
+    QCOMPARE(errors.count(), 5);
+    QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("UNKNOWN_DOCUMENT"));
+    QCOMPARE(errors.at(1).at(0).toString(), QStringLiteral("UNKNOWN_DOCUMENT"));
+    QCOMPARE(errors.at(2).at(0).toString(), QStringLiteral("UNKNOWN_DOCUMENT"));
+    QCOMPARE(errors.at(3).at(0).toString(), QStringLiteral("INVALID_PARAMS"));
+    QCOMPARE(errors.at(4).at(0).toString(), QStringLiteral("INVALID_PARAMS"));
+    QCOMPARE(actionFailed.count(), 5);
+    // 恰好一次、动作标识各就各位（空串 documentId：提交时尚无文档）。
+    QCOMPARE(actionFailed.at(0).at(0).toString(), QString());
+    QCOMPARE(actionFailed.at(0).at(1).toString(), QStringLiteral("image.transform"));
+    QCOMPARE(actionFailed.at(1).at(1).toString(), QStringLiteral("image.transform-preview"));
+    QCOMPARE(actionFailed.at(2).at(1).toString(), QStringLiteral("image.annotate"));
+    QCOMPARE(actionFailed.at(3).at(1).toString(), QStringLiteral("image.transform"));
+    QCOMPARE(actionFailed.at(4).at(1).toString(), QStringLiteral("image.annotate"));
+}
+
+// PendingKind::ApplyTransform 分发：组合对象原样透传的线形由 Python 侧
+// （tests/test_worker_transform.py）锁定；此处锁定消费侧契约——受理建
+// TaskModel 行（行名与旧 transform 统一）、全分辨率完成递增 version/置
+// modified 且无像素文件、预览完成只发 previewReady 不触碰 version/modified
+// （§3.1/§3.2，与 adjust/transform 预览语义一致）。
+void TestDocumentService::applyTransformDispatchAndCompletion() {
+    Harness h;
+    TaskModel model;
+    QAbstractItemModelTester tester(&model);
+    model.setBackend(&h.backend);
+    h.service.bindTaskModel(&model);
+    QSignalSpy versionChanged(&h.service, &DocumentService::documentVersionChanged);
+    QSignalSpy modifiedChanged(&h.service, &DocumentService::documentModifiedChanged);
+    QSignalSpy preview(&h.service, &DocumentService::previewReady);
+    QSignalSpy actionFailed(&h.service, &DocumentService::documentActionFailed);
+
+    h.openDoc(1, QStringLiteral("doc-a1"), QStringLiteral("/tmp/xform.png"), 1024, 768);
+
+    // 全分辨率组合变换（crop + rotate_free 组合，Phase 9 执行顺序归 Worker）。
+    const QJsonObject combo{
+        {QStringLiteral("crop"),
+         QJsonObject{{QStringLiteral("x"), 10}, {QStringLiteral("y"), 10},
+                     {QStringLiteral("width"), 800}, {QStringLiteral("height"), 600}}},
+        {QStringLiteral("rotate_free"),
+         QJsonObject{{QStringLiteral("angle"), 15}, {QStringLiteral("expand"), true}}},
+    };
+    h.service.applyTransform(combo, false, -1);
+    QCOMPARE(h.backend.sendAction(QStringLiteral("probe")), reqId(3)); // 消耗槽位 2
+    h.acceptAsync(2, QStringLiteral("task-t1"));
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.index(0, 0).data(TaskModel::NameRole).toString(), QStringLiteral("应用变换"));
+    QCOMPARE(model.index(0, 0).data(TaskModel::StatusRole).toString(), QStringLiteral("queued"));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-t1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                             {QStringLiteral("width"), 800},
+                                                             {QStringLiteral("height"), 600}}));
+    QCOMPARE(h.service.currentVersion(), 1);
+    QVERIFY(h.service.documentModified());
+    QCOMPARE(versionChanged.count(), 1);
+    QCOMPARE(modifiedChanged.count(), 1);
+    QCOMPARE(preview.count(), 0); // 全分辨率完成无像素文件（同 adjust/transform）
+    QCOMPARE(actionFailed.count(), 0);
+
+    // 预览形态：result.version 为执行时版本——不递增、不置脏，只发 previewReady。
+    h.service.applyTransform(
+        QJsonObject{{QStringLiteral("rotate_free"), QJsonObject{{QStringLiteral("angle"), 30}}}},
+        true, 512);
+    h.acceptAsync(4, QStringLiteral("task-t2")); // 探针已消耗槽位 3
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.index(1, 0).data(TaskModel::NameRole).toString(), QStringLiteral("变换预览"));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-t2"),
+                       QJsonObject{{QStringLiteral("version"), 1},
+                                   {QStringLiteral("width"), 512},
+                                   {QStringLiteral("height"), 384},
+                                   {QStringLiteral("path"), QStringLiteral("/tmp/w/tf.png")},
+                                   {QStringLiteral("sha256"), QStringLiteral("dd")}}));
+    QCOMPARE(preview.count(), 1);
+    QCOMPARE(preview.at(0).at(0).value<QJsonObject>().value(QStringLiteral("path")).toString(),
+             QStringLiteral("/tmp/w/tf.png"));
+    QCOMPARE(h.service.currentVersion(), 1); // 预览不递增（§3.1）
+    QCOMPARE(versionChanged.count(), 1);     // 无新发射
+    QVERIFY(h.service.documentModified());   // 不置脏也不清除
+    QCOMPARE(modifiedChanged.count(), 1);    // 无新发射
+}
+
+// PendingKind::ApplyAnnotate 分发：全分辨率完成递增 version/置 modified、
+// 无像素文件（同 filter.apply 全分辨率路径）；task.failed 时 documentError
+// 照常呈现且 documentActionFailed 恰好一次（action = image.annotate）。
+void TestDocumentService::applyAnnotateDispatchAndFailure() {
+    Harness h;
+    TaskModel model;
+    QAbstractItemModelTester tester(&model);
+    model.setBackend(&h.backend);
+    h.service.bindTaskModel(&model);
+    QSignalSpy versionChanged(&h.service, &DocumentService::documentVersionChanged);
+    QSignalSpy modifiedChanged(&h.service, &DocumentService::documentModifiedChanged);
+    QSignalSpy preview(&h.service, &DocumentService::previewReady);
+    QSignalSpy errors(&h.service, &DocumentService::documentError);
+    QSignalSpy actionFailed(&h.service, &DocumentService::documentActionFailed);
+
+    h.openDoc(1, QStringLiteral("doc-a1"), QStringLiteral("/tmp/annotate.png"), 800, 600);
+
+    const QJsonArray ops{
+        QJsonObject{{QStringLiteral("type"), QStringLiteral("pen")},
+                    {QStringLiteral("points"), QJsonArray{QJsonArray{1, 2}, QJsonArray{3, 4}}},
+                    {QStringLiteral("color"), QStringLiteral("#ff0000")},
+                    {QStringLiteral("width"), 4}},
+        QJsonObject{{QStringLiteral("type"), QStringLiteral("blur_rect")},
+                    {QStringLiteral("x"), 10},
+                    {QStringLiteral("y"), 10},
+                    {QStringLiteral("width"), 50},
+                    {QStringLiteral("height"), 50},
+                    {QStringLiteral("strength"), 8}},
+    };
+    h.service.applyAnnotate(ops);
+    QCOMPARE(h.backend.sendAction(QStringLiteral("probe")), reqId(3)); // 消耗槽位 2
+    h.acceptAsync(2, QStringLiteral("task-an1"));
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.index(0, 0).data(TaskModel::NameRole).toString(), QStringLiteral("应用标注"));
+    emit h.backend.taskEvent(
+        completedEvent(QStringLiteral("task-an1"), QJsonObject{{QStringLiteral("version"), 1},
+                                                              {QStringLiteral("width"), 800},
+                                                              {QStringLiteral("height"), 600}}));
+    QCOMPARE(h.service.currentVersion(), 1);
+    QVERIFY(h.service.documentModified());
+    QCOMPARE(versionChanged.count(), 1);
+    QCOMPARE(modifiedChanged.count(), 1);
+    QCOMPARE(preview.count(), 0); // 全分辨率无像素文件，不发 previewReady
+    QCOMPARE(actionFailed.count(), 0);
+
+    // 失败路径：未落定动作按提交上下文上报恰好一次（QML 在途门控据此解锁）。
+    h.service.applyAnnotate(ops);
+    h.acceptAsync(4, QStringLiteral("task-an2")); // 探针已消耗槽位 3
+    emit h.backend.taskEvent(failedEvent(QStringLiteral("task-an2"),
+                                         QStringLiteral("ENGINE_ERROR"),
+                                         QStringLiteral("标注渲染失败")));
+    QCOMPARE(errors.count(), 1);
+    QCOMPARE(errors.at(0).at(0).toString(), QStringLiteral("ENGINE_ERROR"));
+    QCOMPARE(actionFailed.count(), 1);
+    QCOMPARE(actionFailed.at(0).at(0).toString(), QStringLiteral("doc-a1"));
+    QCOMPARE(actionFailed.at(0).at(1).toString(), QStringLiteral("image.annotate"));
+    // 失败只上报不改状态：版本与脏标记保持完成时的值。
+    QCOMPARE(h.service.currentVersion(), 1);
+    QVERIFY(h.service.documentModified());
+    QCOMPARE(versionChanged.count(), 1);
+    QCOMPARE(modifiedChanged.count(), 1);
 }
 
 void TestDocumentService::staleTaskResultsDroppedAfterReopen() {

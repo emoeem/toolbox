@@ -20,8 +20,9 @@ class BackendManager;
 // Document-facing facade over the Worker protocol (docs/ipc-protocol.md §3):
 // one current document plus the Phase 4 edit actions. image.open / image.save
 // drive the current-document state (id/path/version/modified); image.adjust /
-// image.transform / image.undo / image.redo / image.reset / image.history are
-// submitted as tracked requests and resolved from the task lifecycle events.
+// image.transform（含 Phase 9 组合线形 applyTransform）/ image.annotate /
+// image.undo / image.redo / image.reset / image.history are submitted as
+// tracked requests and resolved from the task lifecycle events.
 //
 // Pending-correlation mirrors TaskModel (task_model.cpp:59-77): every
 // Q_INVOKABLE registers its request_id in m_pendingByRequest at submit time;
@@ -38,8 +39,8 @@ class BackendManager;
 //
 // Version semantics follow docs/ipc-protocol.md §3.1 verbatim:
 //   - image.open resets the version to 0; image.save never changes it.
-//   - Full-resolution image.adjust/transform and undo/redo results carry
-//     result.version, which becomes currentVersion and marks the document
+//   - Full-resolution image.adjust/transform/annotate and undo/redo results
+//     carry result.version, which becomes currentVersion and marks the document
 //     modified; image.reset bumps the version too but clears the modified
 //     flag instead — the pixels are back to the source image (the Worker
 //     side sets modified=false, python_worker/adapters/image_adapter.py),
@@ -86,14 +87,38 @@ class DocumentService : public QObject {
     // 路径写入 SettingsService 最近文件。只接受本地文件 URL。
     Q_INVOKABLE void openDocument(const QUrl &file);
 
-    // image.save（async）：quality < 0 时省略 quality 参数（Worker 用默认）。
-    Q_INVOKABLE void saveDocument(const QString &path, int quality = -1);
+    // image.save（async，§3/§3.9）：quality < 0 时省略 quality 参数（Worker
+    // 用默认）。targetKb > 0 时随请求携带 target_kb（Worker 端二分 JPEG/WebP
+    // quality，§3.9；扩展名/alpha/文档存在性校验归 Worker 提交前判定）。
+    // targetKb <= 0 时不携带该字段——请求形状与未传第三参的调用逐字节一致。
+    Q_INVOKABLE void saveDocument(const QString &path, int quality = -1, int targetKb = -1);
 
     // image.adjust / image.transform（async）：preview=true 走降采样预览管线，
     // maxSide >= 0 时随请求携带 max_side，否则由 Worker 取缺省 768（§3.2）。
     Q_INVOKABLE void adjust(const QJsonObject &adjustments, bool preview = false, int maxSide = -1);
     Q_INVOKABLE void transform(const QString &op, const QJsonObject &params, bool preview = false,
                                int maxSide = -1);
+
+    // image.transform 组合线形（async，Phase 9）：params 为"op 名 → op 参数"
+    // 的组合对象，例如 {crop:{x,y,width,height}, rotate_free:{angle,expand},
+    // perspective:{corners}, scale:{width,height,resample}}，**原样透传**——
+    // 本层不解释、不改写、不校验任何键（组合语义与执行顺序归 Worker）。
+    // 请求形状 {document_id, params, preview, max_side?}：不带顶层 op（旧
+    // {op, params} 线形由 transform() 保留，Worker 两种线形并存，既有语义
+    // 不变）。预览完成只发 previewReady 不递增版本；全分辨率应用递增 version
+    // 并置 modified（§3.1，完成路径与 transform 共用 PendingKind 分支）。
+    // 空 params 本地拒绝（与 applyFilters 空链同一契约：错误 + 恰好一次
+    // documentActionFailed，请求不发出）。
+    Q_INVOKABLE void applyTransform(const QJsonObject &params, bool preview = false,
+                                    int maxSide = -1);
+
+    // image.annotate（async，Phase 9 新动作）：ops 元素形状 {type, ...}
+    // （pen/text/rect/ellipse/arrow/blur_rect/pixelate_rect/eraser，坐标一律
+    // 原图像素坐标），数组**原样透传**，只提交全分辨率应用（无预览形态）：
+    // 完成递增 version、置 modified（§2.3 全分辨率变更类 completed result
+    // 一律携带 version），不发 previewReady（无像素文件）。空 ops 本地拒绝
+    // （同上契约）。
+    Q_INVOKABLE void applyAnnotate(const QJsonArray &ops);
 
     // filter.preview / filter.apply（async，§3）：整条滤镜链一次提交，steps
     // 元素为 {filter_key, params, enabled}。preview=true 的完成结果携带
@@ -132,8 +157,8 @@ class DocumentService : public QObject {
     // 异步响应缺 task_id 的协议违约、后端未绑定。documentId 为提交时的
     // currentDocumentId（陈旧判定同款上下文）；action 为动作标识（协议动作
     // 名，预览任务带 "-preview" 后缀，见 actionId()）。QML 在途门控据此只在
-    // "当前文档的全分辨率 adjust/transform 失败"时解锁——documentId 区分
-    // 换文档后的旧文档失败，action 后缀区分同文档的预览失败。
+    // "当前文档的全分辨率 adjust/transform/annotate 失败"时解锁——documentId
+    // 区分换文档后的旧文档失败，action 后缀区分同文档的预览失败。
     void documentActionFailed(const QString &documentId, const QString &action);
     void historyReady(const QJsonObject &history);
 
@@ -147,7 +172,9 @@ class DocumentService : public QObject {
         Save,
         Adjust,
         Transform,
+        ApplyTransform, // image.transform 组合线形（applyTransform，Phase 9）
         ApplyFilters,
+        ApplyAnnotate, // image.annotate（applyAnnotate，Phase 9，全分辨率）
         Undo,
         Redo,
         Reset,

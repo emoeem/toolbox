@@ -8,8 +8,11 @@ from typing import Any, Callable
 
 from . import protocol
 from .adapters import assist_adapter, batch_adapter, filter_adapter, generate_adapter
-from .adapters.image_adapter import (ADJUST_KEYS, TRANSFORM_REQUIRED_PARAMS, Document, DocumentStore,
-                                     WorkerError, adjust_chain, apply_transform)
+from .adapters.image_adapter import (ADJUST_KEYS, COMPOSITE_TRANSFORM_KEYS, TRANSFORM_REQUIRED_PARAMS,
+                                     Document, DocumentStore, WorkerError, adjust_chain,
+                                     apply_annotate, apply_composite_transform, apply_transform,
+                                     validate_annotate_ops, validate_save_target,
+                                     validate_transform_spec)
 from .task_runtime import TaskRuntime
 
 WORKER_VERSION = '1.0.0'
@@ -65,6 +68,7 @@ class Dispatcher:
             'image.save': self._image_save_job,
             'image.adjust': self._image_adjust_job,
             'image.transform': self._image_transform_job,
+            'image.annotate': self._image_annotate_job,
             'image.undo': self._image_undo_job,
             'image.redo': self._image_redo_job,
             'image.reset': self._image_reset_job,
@@ -389,7 +393,29 @@ class Dispatcher:
         document_id = _require(params, 'document_id')
         path = _require(params, 'path')
         quality = params.get('quality')
+        target_kb = params.get('target_kb')
         store = self.ctx.store
+
+        if target_kb is not None:
+            # Phase 9（§3.9）：target_kb 二分 JPEG/WebP quality。target_kb 仅
+            # 对有损编码有意义、含 alpha 文档不能落 JPEG——扩展名/alpha 检查
+            # 与文档存在性在提交前同步完成（先例同 crop 越界提交前判定）。
+            # target_kb 与 quality 同时给出时 target_kb 优先（quality 被忽略，
+            # §3.9）。无 target_kb 的请求路径逐字节保持既有行为。
+            target_kb = _require_int(target_kb, 'target_kb')
+            if target_kb <= 0:
+                raise WorkerError(protocol.ERR_INVALID_PARAMS, 'target_kb 必须 > 0')
+            doc = store.get(document_id)  # 同步 UNKNOWN_DOCUMENT
+            validate_save_target(doc.image, path, target_kb)
+
+            def job(progress_cb, cancel_token) -> dict:
+                progress_cb(10, '搜索编码质量')
+                result = store.save(document_id, str(path), None,
+                                    target_kb=target_kb, cancel_token=cancel_token)
+                progress_cb(90, '写入完成')
+                return result
+
+            return job
 
         def job(progress_cb, cancel_token) -> dict:
             progress_cb(10, '写入文件')
@@ -509,6 +535,24 @@ class Dispatcher:
     def _image_transform_job(self, params: dict) -> Callable[..., dict]:
         document_id = _require(params, 'document_id')
         op = params.get('op')
+        # Phase 9（§3.2）：新式组合参数两种线形，均与既有 op/params 线形互斥——
+        # a) 顶层键 {document_id, crop?, rotate_free?, perspective?, scale?, …}
+        #    （文档主形状）；
+        # b) 嵌套 {document_id, params: {crop?, …}, …}（C++ applyTransform 的
+        #    原样透传形状；双形状接受同 generate.render 的 generator_key/
+        #    generator 别名口径）。
+        # 既有请求不携带组合键，行为逐字节不变。
+        top_level = [key for key in COMPOSITE_TRANSFORM_KEYS if key in params]
+        nested = params.get('params')
+        nested_composite = (isinstance(nested, dict)
+                            and any(key in nested for key in COMPOSITE_TRANSFORM_KEYS))
+        if top_level or nested_composite:
+            if op is not None or (top_level and 'params' in params):
+                raise WorkerError(protocol.ERR_INVALID_PARAMS,
+                                  'op/params 与组合参数（crop/rotate_free/perspective/scale）不能混用')
+            return self._composite_transform_job(document_id, params,
+                                                 params if top_level else nested)
+
         # JSON 值可能是任意类型：非字符串先拒绝，避免对 dict 做不可哈希成员测试。
         if not isinstance(op, str) or op not in TRANSFORM_REQUIRED_PARAMS:
             raise WorkerError(protocol.ERR_INVALID_PARAMS, f'未知变换 op: {op}')
@@ -557,6 +601,86 @@ class Dispatcher:
                 doc.version += 1
                 return {'version': doc.version,
                         'width': int(transformed.shape[1]), 'height': int(transformed.shape[0])}
+
+        return job
+
+    def _composite_transform_job(self, document_id: str, request: dict,
+                                 spec_source: dict) -> Callable[..., dict]:
+        """新式 image.transform（§3.2 Phase 9）：组合参数 crop/rotate_free/
+        perspective/scale，执行顺序 crop → rotate_free → scale（perspective
+        独立）。request 为完整请求（取 preview/max_side），spec_source 为承载
+        组合键的对象（顶层请求或嵌套 params）。校验在提交前同步完成——文档
+        存在性、crop 越界/负值、角度与四点/scale 取值（先例同 crop op 的越界
+        提交前判定）。全分辨率应用以"快照 + replay"入历史（HistoryEntry 两者
+        并存）：组合变换为确定性函数，undo/redo 参数化重放 bitwise 一致；
+        其上的参数化条目不再被屏障退化。"""
+        doc = self.ctx.store.get(document_id)  # 同步 UNKNOWN_DOCUMENT
+        spec = validate_transform_spec(spec_source, int(doc.image.shape[1]),
+                                       int(doc.image.shape[0]))
+        preview = _require_preview_flag(request.get('preview'))
+        max_side = _require_max_side(request.get('max_side'))
+        store = self.ctx.store
+        temp_dir = self.ctx.temp_dir
+
+        if preview:
+            def job(progress_cb, cancel_token) -> dict:
+                doc = store.get(document_id)
+                version = doc.version  # §2.3：预览 result.version = 执行时的当前版本
+                progress_cb(5, '计算变换预览')
+                cancel_token.raise_if_cancelled()
+                transformed = apply_composite_transform(doc.image, spec)
+                progress_cb(90, '写入预览文件')
+                info = filter_adapter.write_preview(transformed, temp_dir, document_id, max_side)
+                return {'version': version, 'path': info['path'],
+                        'width': info['width'], 'height': info['height'],
+                        'sha256': info['sha256']}
+
+        else:
+            def job(progress_cb, cancel_token) -> dict:
+                doc = store.get(document_id)
+                progress_cb(10, '应用变换')
+                cancel_token.raise_if_cancelled()
+                transformed = apply_composite_transform(doc.image, spec)
+                cancel_token.raise_if_cancelled()
+                store._push_history(doc, 'image.transform',
+                                    replay={'kind': 'transform', 'ops': copy.deepcopy(spec)})
+                doc.image = transformed
+                doc.modified = True
+                doc.version += 1
+                return {'version': doc.version,
+                        'width': int(transformed.shape[1]), 'height': int(transformed.shape[0])}
+
+        return job
+
+    def _image_annotate_job(self, params: dict) -> Callable[..., dict]:
+        """image.annotate（§3.9，Phase 9）：标注 ops 依序应用到文档像素。
+
+        ops 全量校验与文档存在性在提交前同步完成（INVALID_PARAMS /
+        UNKNOWN_DOCUMENT 不产生 task_id，先例同 crop 越界提交前判定）；任务体
+        逐 op 上报进度、逐 op 协作取消（§2.3/§7 标准任务生命周期）。ops 归一
+        化结果序列化进历史条目——参数化条目（不存像素），undo 从基线/最近
+        快照锚点重绘 ops 前缀（复用既有参数化 undo 机制；eraser 重放所需
+        源图基线由 _replay_apply 的 baseline 形参随行）。"""
+        document_id = _require(params, 'document_id')
+        doc = self.ctx.store.get(document_id)  # 同步 UNKNOWN_DOCUMENT
+        ops = validate_annotate_ops(params.get('ops'),
+                                    int(doc.image.shape[1]), int(doc.image.shape[0]))
+        store = self.ctx.store
+
+        def job(progress_cb, cancel_token) -> dict:
+            doc = store.get(document_id)
+            progress_cb(10, '应用标注')
+            cancel_token.raise_if_cancelled()
+            annotated = apply_annotate(doc.image, ops, doc.source_image,
+                                       progress_cb, cancel_token)
+            cancel_token.raise_if_cancelled()
+            store._push_replay_history(doc, 'image.annotate',
+                                       {'kind': 'annotate', 'ops': copy.deepcopy(ops)})
+            doc.image = annotated
+            doc.modified = True
+            doc.version += 1
+            return {'version': doc.version,
+                    'width': int(annotated.shape[1]), 'height': int(annotated.shape[0])}
 
         return job
 

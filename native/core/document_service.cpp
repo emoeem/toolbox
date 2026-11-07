@@ -56,11 +56,16 @@ QString DocumentService::taskDisplayName(PendingKind kind, bool preview) {
     case PendingKind::Adjust:
         return preview ? QStringLiteral("调整预览") : QStringLiteral("应用调整");
     case PendingKind::Transform:
+    case PendingKind::ApplyTransform:
+        // 组合线形与旧 op 线形共用行名：统一变换语义，提交线形由请求形状
+        // 区分（任务抽屉/摘要不感知差异）。
         return preview ? QStringLiteral("变换预览") : QStringLiteral("应用变换");
     case PendingKind::ApplyFilters:
         // 任务清单指定：滤镜链的预览与全分辨率行统一叫"滤镜链"——链级任务
         // 行不区分二者，提交形态由 actionId() 的 filter.preview/apply 区分。
         return QStringLiteral("滤镜链");
+    case PendingKind::ApplyAnnotate:
+        return QStringLiteral("应用标注");
     case PendingKind::Undo:
         return QStringLiteral("撤销");
     case PendingKind::Redo:
@@ -83,10 +88,15 @@ QString DocumentService::actionId(PendingKind kind, bool preview) {
     case PendingKind::Adjust:
         return preview ? QStringLiteral("image.adjust-preview") : QStringLiteral("image.adjust");
     case PendingKind::Transform:
+    case PendingKind::ApplyTransform:
+        // 同一协议动作 image.transform：新旧线形只是请求形状差异（顶层 op
+        // 有无），actionId 不区分——QML 在途门控按动作名解锁即可。
         return preview ? QStringLiteral("image.transform-preview")
                        : QStringLiteral("image.transform");
     case PendingKind::ApplyFilters:
         return preview ? QStringLiteral("filter.preview") : QStringLiteral("filter.apply");
+    case PendingKind::ApplyAnnotate:
+        return QStringLiteral("image.annotate");
     case PendingKind::Undo:
         return QStringLiteral("image.undo");
     case PendingKind::Redo:
@@ -138,7 +148,7 @@ void DocumentService::openDocument(const QUrl &file) {
              QJsonObject{{QStringLiteral("path"), path}}, path);
 }
 
-void DocumentService::saveDocument(const QString &path, int quality) {
+void DocumentService::saveDocument(const QString &path, int quality, int targetKb) {
     if (m_currentDocumentId.isEmpty()) {
         // 本地拒绝同样发 actionFailed：统一契约——每个未落定的动作调用恰好
         // 对应一次失败信号，QML 在途门控永不卡死（CI 实证 unboundBackend 用例）。
@@ -156,6 +166,10 @@ void DocumentService::saveDocument(const QString &path, int quality) {
     };
     if (quality >= 0)
         params.insert(QStringLiteral("quality"), quality);
+    // §3.9（Phase 9）：target_kb 只在 > 0 时携带，targetKb <= 0 的请求与
+    // 既有两参调用形状逐字节一致（协议兼容性规则：既有请求不携带新键）。
+    if (targetKb > 0)
+        params.insert(QStringLiteral("target_kb"), targetKb);
     dispatch(PendingKind::Save, QStringLiteral("image.save"), params, path);
 }
 
@@ -177,6 +191,12 @@ void DocumentService::adjust(const QJsonObject &adjustments, bool preview, int m
 
 void DocumentService::transform(const QString &op, const QJsonObject &params, bool preview,
                                 int maxSide) {
+    // 旧 {op, params} 线形保留原样（既有 QML 调用点 rotate90/flip 与 Worker
+    // 侧 op 校验语义不变，dispatcher.py _image_transform_job 要求顶层 op）；
+    // 未把旧线形改写为 applyTransform 的组合键控线形——那会在 Worker 组合
+    // 扩展落地前打断既有调用。统一在分发自下方完成：同一 actionId、同一
+    // 任务行名、同一 handleCompleted 分支（PendingKind::Transform 与
+    // ApplyTransform 共用），QML 旋转90/翻转按钮随变换页签迁移到 applyTransform。
     if (m_currentDocumentId.isEmpty()) {
         emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
         emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::Transform, preview));
@@ -221,6 +241,62 @@ void DocumentService::applyFilters(const QJsonArray &steps, bool preview, int ma
     dispatch(PendingKind::ApplyFilters,
              preview ? QStringLiteral("filter.preview") : QStringLiteral("filter.apply"), request,
              {}, preview);
+}
+
+void DocumentService::applyTransform(const QJsonObject &params, bool preview, int maxSide) {
+    // 空组合本地拒绝（applyFilters 空链同款契约，先于无文档判定）：一个不含
+    // 任何 op 键的变换请求必然是调用方组装错误，不上送、恰好一次失败上报。
+    if (params.isEmpty()) {
+        emit documentError(QStringLiteral("INVALID_PARAMS"), QStringLiteral("变换参数为空"));
+        emit documentActionFailed(m_currentDocumentId,
+                                  actionId(PendingKind::ApplyTransform, preview));
+        return;
+    }
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId,
+                                  actionId(PendingKind::ApplyTransform, preview));
+        return;
+    }
+    // Phase 9 组合线形（docs/ipc-protocol.md §3 image.transform，Phase 9 批次
+    // 扩展）：params 按"op 名 → op 参数"组合对象**原样透传**——与 applyFilters
+    // 的 steps 数组同一转发方式（document_service 直接作为请求字段值嵌入，线
+    // 上由 PythonWorker::sendRequest 的 QJsonDocument::toJson 序列化，
+    // python_worker.cpp sendRequest），本层不做 QJsonDocument 往返改写。
+    // 不带顶层 op：旧 {op, params} 线形由 transform() 保留，Worker 两种线形
+    // 并存（既有语义不变，只加可选形态）。
+    QJsonObject request{
+        {QStringLiteral("document_id"), m_currentDocumentId},
+        {QStringLiteral("params"), params},
+        {QStringLiteral("preview"), preview},
+    };
+    if (maxSide >= 0)
+        request.insert(QStringLiteral("max_side"), maxSide);
+    dispatch(PendingKind::ApplyTransform, QStringLiteral("image.transform"), request, {}, preview);
+}
+
+void DocumentService::applyAnnotate(const QJsonArray &ops) {
+    // 空 ops 本地拒绝（applyFilters 空链同款契约）：无操作的标注提交必然是
+    // 调用方状态错误（[完成标注] 只应在待提交 ops 非空时可用）。
+    if (ops.isEmpty()) {
+        emit documentError(QStringLiteral("INVALID_PARAMS"), QStringLiteral("标注操作为空"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::ApplyAnnotate, false));
+        return;
+    }
+    if (m_currentDocumentId.isEmpty()) {
+        emit documentError(QStringLiteral("UNKNOWN_DOCUMENT"), QStringLiteral("尚未打开文档"));
+        emit documentActionFailed(m_currentDocumentId, actionId(PendingKind::ApplyAnnotate, false));
+        return;
+    }
+    // image.annotate（Phase 9 新增 async 动作，docs/ipc-protocol.md §3 动作表
+    // 随批次更新）：ops 数组原样透传，只提交全分辨率应用（无预览形态），
+    // preview 分支不存在——completed result 按 §2.3 全分辨率变更类一律携带
+    // version，完成路径见 handleCompleted 的 ApplyAnnotate 分支。
+    const QJsonObject request{
+        {QStringLiteral("document_id"), m_currentDocumentId},
+        {QStringLiteral("ops"), ops},
+    };
+    dispatch(PendingKind::ApplyAnnotate, QStringLiteral("image.annotate"), request);
 }
 
 void DocumentService::undo() {
@@ -355,6 +431,7 @@ void DocumentService::handleCompleted(const Pending &context, const QJsonObject 
     }
     case PendingKind::Adjust:
     case PendingKind::Transform:
+    case PendingKind::ApplyTransform:
         if (stale)
             return;
         if (context.preview) {
@@ -377,6 +454,15 @@ void DocumentService::handleCompleted(const Pending &context, const QJsonObject 
         // filter.apply 完成：result = {version, width, height}（§3.1：全分辨率
         // 递增 version、置 modified；历史条目名 filter.apply，§3.3）。无像素
         // 文件，不发 previewReady。
+        applyCompletedVersion(result, true);
+        return;
+    case PendingKind::ApplyAnnotate:
+        if (stale)
+            return;
+        // image.annotate 完成（全分辨率，无预览形态）：result = {version,
+        // width, height}（§2.3 全分辨率变更类一律携带 version；ops 参数化进
+        // 历史条目，undo 重放归 Worker 端 HistoryEntry 参数化机制）。无像素
+        // 文件，不发 previewReady——与 filter.apply 全分辨率同一处理。
         applyCompletedVersion(result, true);
         return;
     case PendingKind::Undo:
