@@ -364,8 +364,8 @@ Column {
             AppSelectField {
                 id: presetSelect
                 Layout.fillWidth: true
-                placeholderText: root.presetEntries.length === 0
-                                 ? qsTr("暂无预设") : qsTr("选择预设")
+                // ComboBox 无 placeholderText 属性（Qt Quick Controls 2 无此
+                // API，CI 烟雾实证）——空态提示由旁边 Label 承担（后续打磨）。
                 model: {
                     const labels = [];
                     for (let i = 0; i < root.presetEntries.length; ++i)

@@ -104,8 +104,8 @@ class QmlSmokeTest : public QObject {
         {
             int failures = 0;
             const QStringList probeDirs = {
-                QStringLiteral(":/Toolbox/ui/components"),
-                QStringLiteral(":/Toolbox/ui/pages"),
+                QStringLiteral("qrc:/Toolbox/ui/components"),
+                QStringLiteral("qrc:/Toolbox/ui/pages"),
             };
             for (const QString &dir : probeDirs) {
                 const auto entries =
