@@ -93,7 +93,7 @@ class QmlSmokeTest : public QObject {
             QMetaObject::invokeMethod(application, "navigate", Q_ARG(QString, id));
             // 等真实渲染帧（软件光栅下 grabWindow 前至少 3 帧），最多 8s。
             swapSpy.clear();
-            qWaitFor([&swapSpy] { return swapSpy.size() >= 3; }, 8000);
+            QTest::qWaitFor([&swapSpy] { return swapSpy.size() >= 3; }, 8000);
             qWarning().nospace() << "[capture] " << id
                                  << " loader.status=" << loaderItem->property("status").toInt()
                                  << " item=" << loaderItem->property("item")
