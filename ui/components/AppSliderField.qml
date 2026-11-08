@@ -35,7 +35,9 @@ Column {
     signal valueModified()
     signal dragFinished()
 
-    implicitWidth: 200  // default; callers stretch via width/Layout.fillWidth
+    // Column 定位器 implicitWidth 只读（CI 烟雾实证，同 AppNumberField）——
+    // 显式默认宽度用 width；调用方 Layout.fillWidth/width 覆盖仍可拉伸。
+    width: 200
     spacing: Theme.spacingSm
     opacity: root.enabled ? 1.0 : 0.4
 

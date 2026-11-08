@@ -230,7 +230,6 @@ AbstractButton {
                     AppNumberField {
                         id: rField
                         Layout.fillWidth: true
-                        implicitWidth: 0
                         from: 0; to: 255; step: 1; decimals: 0
                         onValueModified: root.applyRgb()
                     }
@@ -247,7 +246,6 @@ AbstractButton {
                     AppNumberField {
                         id: gField
                         Layout.fillWidth: true
-                        implicitWidth: 0
                         from: 0; to: 255; step: 1; decimals: 0
                         onValueModified: root.applyRgb()
                     }
@@ -264,7 +262,6 @@ AbstractButton {
                     AppNumberField {
                         id: bField
                         Layout.fillWidth: true
-                        implicitWidth: 0
                         from: 0; to: 255; step: 1; decimals: 0
                         onValueModified: root.applyRgb()
                     }
