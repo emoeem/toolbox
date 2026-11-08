@@ -113,8 +113,11 @@ jobs:
           EOS
           chmod +x "$PKG/toolbox.sh"
           # 打包自检（v2.0.0-alpha.1 实机反馈催生）：真实启动捆绑运行时并
-          # offscreen 真加载主壳 QML，类型/模块/插件问题就地红。
-          QT_QPA_PLATFORM=offscreen "$PKG/toolbox.sh" --qml-smoke
+          # offscreen 真加载主壳 QML，类型/模块/插件问题就地红。stderr 全量
+          # 落盘，"smoke ok" 为判定锚点（错误明细 tail 打印）。
+          QT_QPA_PLATFORM=offscreen "$PKG/toolbox.sh" --qml-smoke > smoke.log 2>&1 || true
+          tail -30 smoke.log
+          grep -q "smoke ok" smoke.log || { echo "FATAL: linux tar.gz QML smoke failed"; exit 1; }
           tar -czf "toolbox-${VER}-linux-x64.tar.gz" -C pkg .
 
       - name: Build AppImage
@@ -193,8 +196,11 @@ jobs:
             -i "$APPDIR/usr/share/icons/hicolor/256x256/apps/toolbox.png" \
             --plugin qt --output appimage
           test -f "toolbox-${VER}-linux-x64.AppImage" || { echo "AppImage output missing:"; ls -la ./*.AppImage 2>/dev/null || true; exit 1; }
-          # 打包自检：桌面入口（toolbox-start）同路径真加载主壳 QML。
-          APPIMAGE_EXTRACT_AND_RUN=1 "./toolbox-${VER}-linux-x64.AppImage" --qml-smoke
+          # 打包自检：桌面入口（toolbox-start）同路径真加载主壳 QML，
+          # 判定锚点同 tar.gz（"smoke ok"）。
+          APPIMAGE_EXTRACT_AND_RUN=1 "./toolbox-${VER}-linux-x64.AppImage" --qml-smoke > appimage-smoke.log 2>&1 || true
+          tail -30 appimage-smoke.log
+          grep -q "smoke ok" appimage-smoke.log || { echo "FATAL: AppImage QML smoke failed"; exit 1; }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -219,7 +225,7 @@ jobs:
 
       - name: Install toolchain
         run: |
-          pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative uv curl
+          pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-wayland uv curl
 
       - name: makepkg
         shell: bash
@@ -359,11 +365,12 @@ jobs:
           set "PATH=%~dp0python;%PATH%"
           start "" "%~dp0toolbox.exe"
           '@ | Out-File -Encoding ascii "$pkg/toolbox.bat"
-          # 打包自检：offscreen 真加载主壳 QML（v2.0.0-alpha.1 反馈催生）。
+          # 打包自检：offscreen 真加载主壳 QML。"smoke ok" 为判定锚点，
+          # stderr 全量落盘后 tail 打印（错误明细可见）。
           $env:QT_QPA_PLATFORM = "offscreen"
-          & "$pkg/toolbox.exe" --qml-smoke
-          if ($LASTEXITCODE -ne 0) { throw "QML smoke failed on windows bundle" }
-          Compress-Archive -Path "pkg/toolbox-$ver-windows-x64" -DestinationPath "toolbox-$ver-windows-x64.zip"
+          & "$pkg/toolbox.exe" --qml-smoke *> win-smoke.log
+          Get-Content win-smoke.log -Tail 30
+          Select-String -Path win-smoke.log -Pattern "smoke ok" -Quiet | ForEach-Object { if (-not $_) { throw "QML smoke failed on windows bundle" } }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -446,7 +453,11 @@ jobs:
           chmod +x "$PKG/start.command"
           # 打包自检：bundle 内二进制真加载主壳 QML（runner 有 WindowServer，
           # 用默认 cocoa 平台；offscreen 插件未必被 macdeployqt 部署）。
-          "$PKG/Toolbox.app/Contents/MacOS/toolbox" --qml-smoke
+          # stderr 全量落盘再打印——deployqt 的 optional 插件噪音（libmimerapi/
+          # libiodbc 等系统 dylib 探测失败是预期行为）不能淹没 QML 真错误。
+          "$PKG/Toolbox.app/Contents/MacOS/toolbox" --qml-smoke > mac-smoke.log 2>&1 || true
+          tail -30 mac-smoke.log
+          grep -q "smoke ok" mac-smoke.log || { echo "FATAL: mac QML smoke failed"; exit 1; }
           cd pkg && zip -qry "../toolbox-${VER}-macos-arm64.zip" "toolbox-${VER}-macos-arm64" && cd ..
 
       - name: Upload artifact

@@ -40,10 +40,13 @@ int main(int argc, char *argv[]) {
 
     if (smoke) {
         // load() 同步完成：root 对象非空即通过；短转一圈事件循环让首批
-        // 绑定求值/告警浮出，再以 0 退出。
+        // 绑定求值/告警浮出，再以 0 退出。"smoke ok" 是 release.yml 烟雾门
+        // 的判定锚点（stderr 全量落盘后 grep）。
         if (engine.rootObjects().isEmpty()) {
+            qWarning("smoke FAILED: root objects empty");
             return 1;
         }
+        qWarning("smoke ok");
         QTimer::singleShot(300, &app, [] { QCoreApplication::exit(0); });
         return app.exec();
     }
