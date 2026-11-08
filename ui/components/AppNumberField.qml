@@ -67,7 +67,8 @@ Column {
     onToChanged: spinBox.to = Math.round(root.to * root.factor)
     onStepChanged: spinBox.stepSize = Math.max(1, Math.round(root.step * root.factor))
     onDecimalsChanged: {
-        spinBox.decimals = root.decimals;
+        // spinBox 无 decimals 属性（QML SpinBox API 无此项，CI 烟雾实证）——
+        // 精度换算只经 root.factor 与下方两个转换函数。
         root.syncSpin();
     }
 
