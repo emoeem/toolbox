@@ -1,6 +1,7 @@
 import Toolbox
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 // Numeric field wrapping SpinBox (ui-component-spec.md §1 NumberField):
 // value/from/to/decimals/step, ↑/↓ fine-tuning, wheel stepping, and an error
@@ -24,7 +25,10 @@ import QtQuick.Controls
 //
 // Typography: fontSizeNumeric (§2.4); the font family itself is applied
 // application-wide by FontService (Phase 4 task 4).
-Column {
+// 根用 ColumnLayout（非 Column 定位器）：本组件在 EditorPage/SettingsPage 的
+// RowLayout/ColumnLayout 中使用——定位器根的 implicit 尺寸反馈环触发 polish
+// loop（CI 烟雾实证）；嵌套 Layout 是标准解。
+ColumnLayout {
     id: root
 
     property real value: 0
@@ -92,7 +96,7 @@ Column {
 
     SpinBox {
         id: spinBox
-        width: parent.width
+        Layout.fillWidth: true
         height: 32
         editable: root.editable
         // 注意：QML SpinBox 无 decimals 属性（Phase 9 误赋致组件加载失败，
@@ -268,7 +272,7 @@ Column {
 
     Label {
         visible: root.error
-        width: parent.width
+        Layout.fillWidth: true
         text: root.errorText
         font.pixelSize: Theme.fontSizeSmall
         color: Theme.error

@@ -16,7 +16,10 @@ import QtQuick.Layouts
 // - valueModified(): throttled while dragging (interval = motion.fast,
 //   §2.5); flushed once on release together with dragFinished().
 // - suffix: unit string ("°", "%") shown after the value field.
-Column {
+// 根用 ColumnLayout（非 Column 定位器）：本组件在 EditorPage 检查器
+// ColumnLayout 与 BatchWizard 中使用——定位器根的 implicit 尺寸反馈环触发
+// polish loop（CI 烟雾实证）；嵌套 Layout 是标准解。
+ColumnLayout {
     id: root
 
     property string label: ""
@@ -89,7 +92,7 @@ Column {
     }
 
     RowLayout {
-        width: parent.width
+        Layout.fillWidth: true
         spacing: Theme.spacingSm
 
         Label {
@@ -124,7 +127,7 @@ Column {
 
     Slider {
         id: slider
-        width: parent.width
+        Layout.fillWidth: true
         stepSize: root.step
 
         onMoved: {
