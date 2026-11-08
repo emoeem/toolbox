@@ -161,10 +161,12 @@ Column {
                 anchors.centerIn: parent
                 width: 12
                 height: 8
+                // spinBox.up/down 组无 enabled 成员（CI 烟雾实证）——resting
+                // 色取 textSecondary，禁用态由字段整体 40% 透明度表达。
                 property color glyphColor:
                     spinBox.up.pressed ? Theme.accentPressed
-                        : spinBox.up.hovered ? Theme.textPrimary : Theme.textSecondary
-                        : Theme.textDisabled
+                        : spinBox.up.hovered ? Theme.textPrimary
+                        : Theme.textSecondary
                 onGlyphColorChanged: requestPaint()
                 onPaint: {
                     const ctx = getContext("2d");
@@ -202,8 +204,8 @@ Column {
                 height: 8
                 property color glyphColor:
                     spinBox.down.pressed ? Theme.accentPressed
-                        : spinBox.down.hovered ? Theme.textPrimary : Theme.textSecondary
-                        : Theme.textDisabled
+                        : spinBox.down.hovered ? Theme.textPrimary
+                        : Theme.textSecondary
                 onGlyphColorChanged: requestPaint()
                 onPaint: {
                     const ctx = getContext("2d");
