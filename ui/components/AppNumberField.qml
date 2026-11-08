@@ -242,25 +242,25 @@ Column {
                 border.width: 2
                 visible: spinBox.visualFocus && spinBox.enabled
             }
-        }
-    }
 
-    // Wheel stepping overlay: NoButton keeps click pass-through, and
-    // hoverEnabled stays false so the SpinBox's own up/down hover indicators
-    // still receive hover (评审修正：MouseArea 悬停会阻断下层 item 的 hover);
-    // wheel delivery does not depend on hoverEnabled. Steps via nudge()
-    // because SpinBox.increase() would not emit valueModified.
-    MouseArea {
-        anchors.fill: spinBox
-        acceptedButtons: Qt.NoButton
-        hoverEnabled: false
-        onWheel: (wheel) => {
-            if (!spinBox.enabled)
-                return;
-            if (wheel.angleDelta.y === 0)
-                return;
-            root.nudge(wheel.angleDelta.y > 0 ? 1 : -1);
-            wheel.accepted = true;
+            // Wheel stepping overlay（迁入 SpinBox 内部——原为 Column 直接子项
+            // + anchors.fill: spinBox，定位器子项禁止 anchors，CI 烟雾实证）：
+            // NoButton 保持点击穿透，hoverEnabled false 让 SpinBox 自带上下
+            // 指示器仍收 hover；滚轮经 nudge() 步进（SpinBox.increase() 不发
+            // valueModified）。
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                hoverEnabled: false
+                onWheel: (wheel) => {
+                    if (!spinBox.enabled)
+                        return;
+                    if (wheel.angleDelta.y === 0)
+                        return;
+                    root.nudge(wheel.angleDelta.y > 0 ? 1 : -1);
+                    wheel.accepted = true;
+                }
+            }
         }
     }
 
