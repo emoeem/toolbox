@@ -115,8 +115,8 @@ class QmlSmokeTest : public QObject {
                     QQmlComponent probe(&engine, QUrl(url));
                     if (probe.isError()) {
                         ++failures;
-                        qWarning().nospace() << "PROBE-FAIL " << url << " -> "
-                                             << probe.errorString();
+                        qWarning().nospace()
+                            << "PROBE-FAIL " << url << " -> " << probe.errorString();
                     }
                 }
             }
