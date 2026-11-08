@@ -155,6 +155,11 @@ qt_add_qml_module(toolbox
     URI Toolbox
     VERSION 1.0
     RESOURCE_PREFIX "/"
+    # TOOLBOX_NO_QMLCACHEGEN（release.yml 三平台设 ON）：qmlcachegen AOT 与
+    # Qt 6.10 类型注册顺序冲突致 Main.qml 组件互查随机失败（烟雾门实证，
+    # linux 报 AppTaskQueuePanel/mac 报 AppStatusBar 每轮不同）。alpha 阶段
+    # 运行时 JIT 解析，启动开销可接受；正式版前专项复核。
+    ${TOOLBOX_NO_QMLCACHEGEN_ARGS}
     QML_FILES ${QML_FILES}
 )
 

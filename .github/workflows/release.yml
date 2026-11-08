@@ -22,6 +22,8 @@ jobs:
       QT_ROOT_DIR: /usr/lib/x86_64-linux-gnu/qt6
       QT_LIB_DIR: /usr/lib/x86_64-linux-gnu
       QT_QMAKE: /usr/lib/qt6/bin/qmake6
+      # 传给 qt_add_qml_module 的 NO_CACHEGEN 开关（见 CMakeLists.txt 根注释）。
+      TOOLBOX_NO_QMLCACHEGEN_ARGS: NO_CACHEGEN
     steps:
       - uses: actions/checkout@v6
 
@@ -54,7 +56,7 @@ jobs:
           # cc1plus 直接耗尽 runner 内存（Run 1：编译 98% 处全部进程被
           # Terminated，job 被标记 canceled——OOM killer 清场特征）。
           # ubuntu-22.04 标准 runner 4 核 16GB，-j4 峰值内存受控。
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_DISABLE_QMLCACHEGEN=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
           cmake --build build --config Release -j4
 
       - name: Assemble portable tar.gz
@@ -299,6 +301,8 @@ jobs:
     timeout-minutes: 60
     env:
       VERSION_NO_V: ${{ github.ref_name }}
+      # 传给 qt_add_qml_module 的 NO_CACHEGEN 开关（见 CMakeLists.txt 根注释）。
+      TOOLBOX_NO_QMLCACHEGEN_ARGS: NO_CACHEGEN
     steps:
       - uses: actions/checkout@v6
 
@@ -319,7 +323,7 @@ jobs:
 
       - name: Build native shell
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_QMLCACHEGEN=ON
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release -j
 
       - name: Assemble package
@@ -386,6 +390,8 @@ jobs:
     timeout-minutes: 60
     env:
       VERSION_NO_V: ${{ github.ref_name }}
+      # 传给 qt_add_qml_module 的 NO_CACHEGEN 开关（见 CMakeLists.txt 根注释）。
+      TOOLBOX_NO_QMLCACHEGEN_ARGS: NO_CACHEGEN
     steps:
       - uses: actions/checkout@v6
 
@@ -413,7 +419,7 @@ jobs:
           # 以 CMAKE_MACOSX_BUNDLE 显式开 bundle，否则没有 .app 可给
           # macdeployqt。BUILD_TESTING=OFF：发布构建不跑测试（ci.yml 负责），
           # 避免测试目标也被 bundle 化。
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -DCMAKE_MACOSX_BUNDLE=ON -DBUILD_TESTING=OFF -DCMAKE_DISABLE_QMLCACHEGEN=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -DCMAKE_MACOSX_BUNDLE=ON -DBUILD_TESTING=OFF
           # -j 显式给数字：裸 -j 在 make 里是"不限并发"（Linux job 同配置被
           # OOM 清场，见 build-linux 注释）；macOS runner 3 核，对齐 -j3。
           cmake --build build --config Release -j3
