@@ -121,10 +121,10 @@ class QmlSmokeTest : public QObject {
             };
             for (const QString &u : probeUrls) {
                 QQmlComponent probe(&engine, QUrl(u));
-                qWarning().nospace() << "probe " << u << " -> "
-                                     << (probe.isError() ? QStringLiteral("ERROR: ") +
-                                                             probe.errorString()
-                                                         : QStringLiteral("OK"));
+                qWarning().nospace()
+                    << "probe " << u << " -> "
+                    << (probe.isError() ? QStringLiteral("ERROR: ") + probe.errorString()
+                                        : QStringLiteral("OK"));
             }
         }
         const QStringList pageIds = {
