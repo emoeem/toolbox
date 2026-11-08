@@ -94,6 +94,7 @@ ApplicationWindow {
 
         Loader {
             id: pageLoader
+            objectName: "pageLoader"
             anchors.fill: parent
             source: Application.currentPage
         }

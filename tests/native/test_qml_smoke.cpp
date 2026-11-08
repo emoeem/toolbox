@@ -13,9 +13,12 @@
 #include <QImage>
 #include <QLibraryInfo>
 #include <QQmlApplicationEngine>
+#include <QQuickItem>
+#include <QQuickLoader>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
+#include <QSignalSpy>
 #include <QTest>
 #include <QUrl>
 #include <QtQml/qqml.h>
@@ -75,6 +78,12 @@ class QmlSmokeTest : public QObject {
         QVERIFY2(outDir.mkpath(QStringLiteral(".")), "SCREENSHOT_DIR 无法创建");
         // 窗口先稳定渲染一帧，避免首帧空白。
         QTest::qWait(300);
+        // 页面 Loader（Main.qml objectName=pageLoader）：诊断四页空白的地面真相
+        // ——status/item 几何/可见性逐页打印并断言。
+        auto *loaderItem = window->findChild<QQuickItem *>(QStringLiteral("pageLoader"));
+        QVERIFY2(loaderItem != nullptr, "找不到 pageLoader（Main.qml objectName 缺失）");
+        QSignalSpy swapSpy(window, &QQuickWindow::frameSwapped);
+        QVERIFY2(swapSpy.isValid(), "frameSwapped 信号监视无效");
         const QStringList pageIds = {
             QStringLiteral("home"),  QStringLiteral("editor"),   QStringLiteral("create"),
             QStringLiteral("batch"), QStringLiteral("analyze"),  QStringLiteral("ai"),
@@ -83,7 +92,16 @@ class QmlSmokeTest : public QObject {
         for (const QString &id : pageIds) {
             const int before = pageWarnings.size();
             QMetaObject::invokeMethod(application, "navigate", Q_ARG(QString, id));
-            QTest::qWait(400);
+            // 等真实渲染帧（软件光栅下 grabWindow 前至少 3 帧），最多 8s。
+            swapSpy.clear();
+            qWaitFor([&swapSpy] { return swapSpy.size() >= 3; }, 8000);
+            qWarning().nospace() << "[capture] " << id << " loader.status="
+                                 << loaderItem->property("status").toInt()
+                                 << " item=" << loaderItem->property("item")
+                                 << " warnings+=" << (pageWarnings.size() - before);
+            QVERIFY2(loaderItem->property("status").toInt() == QQuickLoader::Ready,
+                     qPrintable(QStringLiteral("页面 %1 Loader 未 Ready：status=")
+                                    .arg(id) + loaderItem->property("status").toString()));
             QVERIFY2(pageWarnings.size() == before,
                      qPrintable(QStringLiteral("页面 %1 加载产生 QML 错误：\n%2")
                                     .arg(id, pageWarnings.join("\n"))));
