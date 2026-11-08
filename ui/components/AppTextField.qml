@@ -40,7 +40,7 @@ TextField {
             color: "transparent"
             border.color: Theme.accent
             border.width: 2
-            visible: root.visualFocus
+            visible: root.activeFocus
         }
     }
 }

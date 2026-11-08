@@ -151,7 +151,7 @@ Column {
             Rectangle {
                 anchors.fill: parent
                 radius: Theme.radiusSm
-                visible: spinBox.up.enabled && (spinBox.up.hovered || spinBox.up.pressed)
+                visible: spinBox.up.hovered || spinBox.up.pressed
                 color: spinBox.up.pressed ? Qt.darker(Theme.surfaceElevated, 1.15)
                                           : Qt.darker(Theme.surfaceElevated, 1.08)
             }
@@ -163,7 +163,7 @@ Column {
                 height: 8
                 property color glyphColor:
                     spinBox.up.pressed ? Theme.accentPressed
-                        : spinBox.up.enabled ? (spinBox.up.hovered ? Theme.textPrimary : Theme.textSecondary)
+                        : spinBox.up.hovered ? Theme.textPrimary : Theme.textSecondary
                         : Theme.textDisabled
                 onGlyphColorChanged: requestPaint()
                 onPaint: {
@@ -190,7 +190,7 @@ Column {
             Rectangle {
                 anchors.fill: parent
                 radius: Theme.radiusSm
-                visible: spinBox.down.enabled && (spinBox.down.hovered || spinBox.down.pressed)
+                visible: spinBox.down.hovered || spinBox.down.pressed
                 color: spinBox.down.pressed ? Qt.darker(Theme.surfaceElevated, 1.15)
                                             : Qt.darker(Theme.surfaceElevated, 1.08)
             }
@@ -202,7 +202,7 @@ Column {
                 height: 8
                 property color glyphColor:
                     spinBox.down.pressed ? Theme.accentPressed
-                        : spinBox.down.enabled ? (spinBox.down.hovered ? Theme.textPrimary : Theme.textSecondary)
+                        : spinBox.down.hovered ? Theme.textPrimary : Theme.textSecondary
                         : Theme.textDisabled
                 onGlyphColorChanged: requestPaint()
                 onPaint: {

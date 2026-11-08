@@ -778,7 +778,7 @@ Page {
             // inside ImageCanvas (mouseDoubleClickEvent → fitToWindow).
             ColumnLayout {
                 anchors.centerIn: parent
-                visible: canvas.imageSize.isEmpty
+                visible: canvas.imageSize.width <= 0
                 spacing: Theme.spacingMd
 
                 Label {
@@ -1319,7 +1319,7 @@ Page {
         anchors.bottom: parent.bottom
 
         leftText: {
-            if (canvas.imageSize.isEmpty)
+            if (canvas.imageSize.width <= 0)
                 return qsTr("未打开图像");
             let text = canvas.imageSize.width + "×" + canvas.imageSize.height;
             if (page.hasDocument)
