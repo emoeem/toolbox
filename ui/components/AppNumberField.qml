@@ -45,7 +45,10 @@ Column {
     // SpinBox stores integers scaled by 10^decimals.
     readonly property real factor: Math.pow(10, root.decimals)
 
-    implicitWidth: 140  // default; callers stretch via width/Layout.fillWidth
+    // Column 定位器的 implicitWidth/Height 由子项自动计算（只读，CI 烟雾
+    // 实证 Invalid property assignment）——显式宽度用 width，调用方经
+    // Layout.fillWidth/width 覆盖仍可拉伸。
+    width: 140
 
     // design-system §4 Disabled: the field-wide 40% opacity on top of the
     // textDisabled/glyph colors, same as AppSliderField/AppSelectField.
