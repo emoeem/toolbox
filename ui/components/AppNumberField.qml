@@ -46,9 +46,9 @@ Column {
     readonly property real factor: Math.pow(10, root.decimals)
 
     // Column 定位器的 implicitWidth/Height 由子项自动计算（只读，CI 烟雾
-    // 实证 Invalid property assignment）——显式宽度用 width，调用方经
-    // Layout.fillWidth/width 覆盖仍可拉伸。
-    width: 140
+    // 实证 Invalid property assignment）——组件不自带宽度（Layout 上下文里
+    // 命令式 width 会与 Layout 尺寸管理打架触发 polish loop，CI 实证）；
+    // 全部使用点已在 Layout 中显式定宽（fillWidth/preferredWidth）。
 
     // design-system §4 Disabled: the field-wide 40% opacity on top of the
     // textDisabled/glyph colors, same as AppSliderField/AppSelectField.

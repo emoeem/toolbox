@@ -351,6 +351,7 @@ Page {
 
                         AppNumberField {
                             id: sizeField
+                            Layout.preferredWidth: 140
 
                             decimals: 0
                             step: 1

@@ -35,9 +35,9 @@ Column {
     signal valueModified()
     signal dragFinished()
 
-    // Column 定位器 implicitWidth 只读（CI 烟雾实证，同 AppNumberField）——
-    // 显式默认宽度用 width；调用方 Layout.fillWidth/width 覆盖仍可拉伸。
-    width: 200
+    // Column 定位器 implicitWidth 只读（CI 烟雾实证，同 AppNumberField）且
+    // 组件不自带宽度（Layout 上下文命令式 width 触发 polish loop）——全部
+    // 使用点已在 Layout 中显式定宽（fillWidth/preferredWidth/width）。
     spacing: Theme.spacingSm
     opacity: root.enabled ? 1.0 : 0.4
 
