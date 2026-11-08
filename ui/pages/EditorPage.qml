@@ -1179,7 +1179,6 @@ Page {
                                 AppNumberField {
                                     id: scaleWidthField
                                     Layout.fillWidth: true
-                                    implicitWidth: 0
                                     from: 1; to: 100000; step: 1; decimals: 0
                                     value: page.documentWidth
                                 }
@@ -1196,7 +1195,6 @@ Page {
                                 AppNumberField {
                                     id: scaleHeightField
                                     Layout.fillWidth: true
-                                    implicitWidth: 0
                                     from: 1; to: 100000; step: 1; decimals: 0
                                     value: page.documentHeight
                                 }
