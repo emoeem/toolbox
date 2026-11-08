@@ -77,8 +77,8 @@ class QmlSmokeTest : public QObject {
                 continue;
             hardErrors << w;
         }
-        QVERIFY2(hardErrors.isEmpty(),
-                 qPrintable(QStringLiteral("Main.qml 加载产生致命警告：\n") + hardErrors.join("\n")));
+        QVERIFY2(hardErrors.isEmpty(), qPrintable(QStringLiteral("Main.qml 加载产生致命警告：\n") +
+                                                  hardErrors.join("\n")));
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
         QVERIFY2(window != nullptr, "根对象不是 QQuickWindow");
         // Qt 6.4 无 (uri, typeName) 模板重载（CI 实证），经 qmlTypeId 取。
