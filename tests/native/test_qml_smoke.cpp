@@ -14,7 +14,6 @@
 #include <QLibraryInfo>
 #include <QQmlApplicationEngine>
 #include <QQuickItem>
-#include <QQuickLoader>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
@@ -95,13 +94,15 @@ class QmlSmokeTest : public QObject {
             // 等真实渲染帧（软件光栅下 grabWindow 前至少 3 帧），最多 8s。
             swapSpy.clear();
             qWaitFor([&swapSpy] { return swapSpy.size() >= 3; }, 8000);
-            qWarning().nospace() << "[capture] " << id
-                                 << " loader.status=" << loaderItem->property("status").toInt()
+            qWarning().nospace() << "[capture] " << id << " loader.status="
+                                 << loaderItem->property("status").toInt()
                                  << " item=" << loaderItem->property("item")
                                  << " warnings+=" << (pageWarnings.size() - before);
-            QVERIFY2(loaderItem->property("status").toInt() == QQuickLoader::Ready,
-                     qPrintable(QStringLiteral("页面 %1 Loader 未 Ready：status=").arg(id) +
-                                loaderItem->property("status").toString()));
+            // Loader.status 枚举：Null=0 / Ready=1 / Loading=2（QQuickLoader
+            // 无公开 C++ 头，属性通道取值）。
+            QVERIFY2(loaderItem->property("status").toInt() == 1,
+                     qPrintable(QStringLiteral("页面 %1 Loader 未 Ready：status=")
+                                    .arg(id) + loaderItem->property("status").toString()));
             QVERIFY2(pageWarnings.size() == before,
                      qPrintable(QStringLiteral("页面 %1 加载产生 QML 错误：\n%2")
                                     .arg(id, pageWarnings.join("\n"))));
