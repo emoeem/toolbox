@@ -111,7 +111,9 @@ class QmlSmokeTest : public QObject {
                 const auto entries =
                     QDir(dir).entryList(QStringList() << QStringLiteral("*.qml"), QDir::Files);
                 for (const QString &entry : entries) {
-                    const QString url = dir + QStringLiteral("/") + entry;
+                    // 必须显式 qrc: 前缀——":/" 简写在 file baseUrl 引擎里被当
+                    // 相对路径解析（CI 实证全部 "file to open is a directory"）。
+                    const QString url = QStringLiteral("qrc:") + dir + QStringLiteral("/") + entry;
                     QQmlComponent probe(&engine, QUrl(url));
                     if (probe.isError()) {
                         ++failures;
