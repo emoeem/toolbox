@@ -43,14 +43,26 @@ class QmlSmokeTest : public QObject {
 
     // 逐页截图：navigate 到每个一级入口，等渲染稳定后 grabWindow。
     // 离屏渲染走 software 光栅化（Grab 无 GPU 依赖）；每页 ~0.5s。
+    // 页面加载错误必须在场即红（v2.0.0-alpha.2 判决：editor/batch/settings/
+    // studio 四页空白加载，ctest 隐藏通过用例输出导致错误不可见——本断言
+    // 强制所有页面级 QML 错误浮出）。
     void capturePages() {
         QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         QQmlApplicationEngine engine;
         engine.addImportPath(QLibraryInfo::path(QLibraryInfo::Qml2ImportsPath));
+        QStringList pageWarnings;
+        QObject::connect(&engine, &QQmlApplicationEngine::warnings,
+                         [&pageWarnings](const QList<QQmlError> &warnings) {
+                             for (const auto &w : warnings) {
+                                 pageWarnings << w.toString();
+                             }
+                         });
         engine.load(QUrl(QStringLiteral("qrc:/Toolbox/ui/Main.qml")));
         QVERIFY2(!engine.rootObjects().isEmpty(),
                  "Main.qml 加载失败——QML 错误明细见上方 stderr 输出");
+        QVERIFY2(pageWarnings.isEmpty(),
+                 qPrintable(QStringLiteral("Main.qml 加载产生警告：\n") + pageWarnings.join("\n")));
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
         QVERIFY2(window != nullptr, "根对象不是 QQuickWindow");
         // Qt 6.4 无 (uri, typeName) 模板重载（CI 实证），经 qmlTypeId 取。
@@ -69,8 +81,12 @@ class QmlSmokeTest : public QObject {
             QStringLiteral("files"), QStringLiteral("settings"),
         };
         for (const QString &id : pageIds) {
+            const int before = pageWarnings.size();
             QMetaObject::invokeMethod(application, "navigate", Q_ARG(QString, id));
             QTest::qWait(400);
+            QVERIFY2(pageWarnings.size() == before,
+                     qPrintable(QStringLiteral("页面 %1 加载产生 QML 错误：\n%2")
+                                    .arg(id, pageWarnings.join("\n"))));
             const QImage shot = window->grabWindow();
             const QString path = outDir.filePath(id + QStringLiteral(".png"));
             QVERIFY2(shot.save(path), qPrintable(QStringLiteral("截图保存失败: ") + path));
