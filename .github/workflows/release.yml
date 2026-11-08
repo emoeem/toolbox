@@ -107,9 +107,9 @@ jobs:
           fi
           export LD_LIBRARY_PATH="$DIR/qt/lib:${LD_LIBRARY_PATH:-}"
           export QT_PLUGIN_PATH="$DIR/qt/plugins"
-          # Qt 自身 QML 模块导入路径（QQmlTypeLoader 两个变量都读）。
-          export QML2_IMPORT_PATH="$DIR/qt/qml"
-          export QML_IMPORT_PATH="$DIR/qt/qml"
+          # 注意：不设 QML2_IMPORT_PATH/QML_IMPORT_PATH——Qt 6 由 QLibraryInfo
+          # 自动发现 qml/（相对 lib/ 的标准布局）；显式指向打包 qml/ 会与 qrc
+          # 内嵌模块注册冲突（随机 "X is not a type"，烟雾门多轮实证）。
           export PATH="$DIR/python/bin:$PATH"
           exec "$DIR/toolbox"
           EOS
@@ -177,8 +177,8 @@ jobs:
           fi
           export LD_LIBRARY_PATH="$USR/lib:${LD_LIBRARY_PATH:-}"
           export QT_PLUGIN_PATH="$USR/plugins:${QT_PLUGIN_PATH:-}"
-          export QML2_IMPORT_PATH="$USR/qml:${QML2_IMPORT_PATH:-}"
-          export QML_IMPORT_PATH="$USR/qml:${QML_IMPORT_PATH:-}"
+          # 不设 QML2_IMPORT_PATH/QML_IMPORT_PATH（Qt 6 自动发现 + 避免与
+          # qrc 内嵌模块注册冲突，见 toolbox.sh 注释）。
           export PATH="$ROOT/python/bin:$PATH"
           exec "$(dirname "$SELF")/toolbox" "$@"
           EOS
