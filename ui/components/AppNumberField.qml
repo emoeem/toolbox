@@ -94,7 +94,8 @@ Column {
         width: parent.width
         height: 32
         editable: root.editable
-        decimals: root.decimals
+        // 注意：QML SpinBox 无 decimals 属性（Phase 9 误赋致组件加载失败，
+        // CI 烟雾实证）——小数精度由 root.factor 换算 + 上方两个转换函数处理。
         rightPadding: 28  // reserves the up/down indicator column
 
         textFromValue: function(value, locale) {
