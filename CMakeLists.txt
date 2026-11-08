@@ -151,14 +151,19 @@ set(QML_FILES
 # Theme.qml 是 QML 单例（pragma Singleton），需显式标记。
 set_source_files_properties(ui/themes/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
+# TOOLBOX_NO_QMLCACHEGEN（release.yml 三平台 cmake -D 设 ON）：qmlcachegen AOT
+# 与 Qt 6.10 类型注册顺序冲突致 Main.qml 组件互查随机失败（烟雾门实证：
+# linux 报 AppTaskQueuePanel / mac 报 AppStatusBar，每轮不同）。alpha 阶段
+# 运行时 JIT 解析，启动开销可接受；正式版前专项复核。
+option(TOOLBOX_NO_QMLCACHEGEN "Disable qmlcachegen AOT for QML modules" OFF)
+if(TOOLBOX_NO_QMLCACHEGEN)
+    set(TOOLBOX_NO_QMLCACHEGEN_ARGS NO_CACHEGEN)
+endif()
+
 qt_add_qml_module(toolbox
     URI Toolbox
     VERSION 1.0
     RESOURCE_PREFIX "/"
-    # TOOLBOX_NO_QMLCACHEGEN（release.yml 三平台设 ON）：qmlcachegen AOT 与
-    # Qt 6.10 类型注册顺序冲突致 Main.qml 组件互查随机失败（烟雾门实证，
-    # linux 报 AppTaskQueuePanel/mac 报 AppStatusBar 每轮不同）。alpha 阶段
-    # 运行时 JIT 解析，启动开销可接受；正式版前专项复核。
     ${TOOLBOX_NO_QMLCACHEGEN_ARGS}
     QML_FILES ${QML_FILES}
 )
@@ -204,6 +209,7 @@ if(BUILD_TESTING)
         RESOURCE_PREFIX "/"
         # 与主程序同 URI → 生成目录会与 toolbox 模块冲突（CI 实证），单独指派。
         OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/smoke-qml/Toolbox
+        ${TOOLBOX_NO_QMLCACHEGEN_ARGS}
         SOURCES ${TOOLBOX_SMOKE_SOURCES}
         QML_FILES ${QML_FILES}
     )

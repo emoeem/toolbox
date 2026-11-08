@@ -56,7 +56,7 @@ jobs:
           # cc1plus 直接耗尽 runner 内存（Run 1：编译 98% 处全部进程被
           # Terminated，job 被标记 canceled——OOM killer 清场特征）。
           # ubuntu-22.04 标准 runner 4 核 16GB，-j4 峰值内存受控。
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DTOOLBOX_NO_QMLCACHEGEN=ON
           cmake --build build --config Release -j4
 
       - name: Assemble portable tar.gz
@@ -323,7 +323,7 @@ jobs:
 
       - name: Build native shell
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTOOLBOX_NO_QMLCACHEGEN=ON
           cmake --build build --config Release -j
 
       - name: Assemble package
@@ -419,7 +419,7 @@ jobs:
           # 以 CMAKE_MACOSX_BUNDLE 显式开 bundle，否则没有 .app 可给
           # macdeployqt。BUILD_TESTING=OFF：发布构建不跑测试（ci.yml 负责），
           # 避免测试目标也被 bundle 化。
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -DCMAKE_MACOSX_BUNDLE=ON -DBUILD_TESTING=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -DCMAKE_MACOSX_BUNDLE=ON -DBUILD_TESTING=OFF -DTOOLBOX_NO_QMLCACHEGEN=ON
           # -j 显式给数字：裸 -j 在 make 里是"不限并发"（Linux job 同配置被
           # OOM 清场，见 build-linux 注释）；macOS runner 3 核，对齐 -j3。
           cmake --build build --config Release -j3
