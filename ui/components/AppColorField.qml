@@ -205,7 +205,7 @@ AbstractButton {
                     id: hexField
                     Layout.fillWidth: true
                     font.pixelSize: Theme.fontSizeNumeric
-                    validator: RegExpValidator {
+                    validator: RegularExpressionValidator {
                         regularExpression: /^#?[0-9a-fA-F]{6}$/
                     }
                     onEditingFinished: root.applyHex()
