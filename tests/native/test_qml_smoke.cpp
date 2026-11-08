@@ -9,6 +9,7 @@
 // SOURCES/QML_FILES 重复声明 qt_add_qml_module（独立二进制，不与主程序冲突），
 // C++ QML 单例（Application/SettingsService 等）随源编入。
 #include <QDir>
+#include <QFile>
 #include <QGuiApplication>
 #include <QImage>
 #include <QLibraryInfo>
@@ -97,6 +98,35 @@ class QmlSmokeTest : public QObject {
         QVERIFY2(loaderItem != nullptr, "找不到 pageLoader（Main.qml objectName 缺失）");
         QSignalSpy swapSpy(window, &QQuickWindow::frameSwapped);
         QVERIFY2(swapSpy.isValid(), "frameSwapped 信号监视无效");
+        // 终极地面真相：dump 模块 qmldir 实际内容 + 按 URL 直载三个关键组件，
+        // 区分“qmldir 缺条目”与“组件文件自身加载失败”。
+        {
+            QFile qmldir(QStringLiteral(":/Toolbox/qmldir"));
+            if (qmldir.open(QIODevice::ReadOnly)) {
+                const QList<QByteArray> lines = qmldir.readAll().split('\n');
+                qWarning() << "qmldir 行数:" << lines.size();
+                for (const QByteArray &line : lines) {
+                    if (line.contains("AppNumberField") || line.contains("AppColorField") ||
+                        line.contains("AppAnnotateToolbar") || line.contains("AppButton") ||
+                        line.contains("singleton"))
+                        qWarning() << "qmldir:" << line.trimmed();
+                }
+            } else {
+                qWarning() << "qrc:/Toolbox/qmldir 不存在！";
+            }
+            const QStringList probeUrls = {
+                QStringLiteral("qrc:/Toolbox/ui/components/AppNumberField.qml"),
+                QStringLiteral("qrc:/Toolbox/ui/components/AppColorField.qml"),
+                QStringLiteral("qrc:/Toolbox/ui/components/AppButton.qml"),
+            };
+            for (const QString &u : probeUrls) {
+                QQmlComponent probe(&engine, QUrl(u));
+                qWarning().nospace() << "probe " << u << " -> "
+                                     << (probe.isError() ? QStringLiteral("ERROR: ") +
+                                                             probe.errorString()
+                                                         : QStringLiteral("OK"));
+            }
+        }
         const QStringList pageIds = {
             QStringLiteral("home"),  QStringLiteral("editor"),   QStringLiteral("create"),
             QStringLiteral("batch"), QStringLiteral("analyze"),  QStringLiteral("ai"),
